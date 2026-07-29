@@ -1,0 +1,467 @@
+:root {
+  --bg: #12141a;
+  --panel: rgba(20, 23, 31, 0.92);
+  --panel-solid: #171a22;
+  --edge: rgba(255, 255, 255, 0.11);
+  --ink: #f2f4f8;
+  --ink-dim: #9aa2b4;
+  --accent: #ffce00; /* line 1 yellow */
+  --accent-ink: #1a1a1a;
+  --good: #4ade80;
+  --bad: #f87171;
+  --radius: 14px;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+}
+
+/* The pin is the whole interaction, so make the target obvious. */
+#map.is-guessing {
+  cursor: crosshair;
+}
+
+/* ---------- overlays (start + end screens) ---------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 11, 15, 0.82);
+  backdrop-filter: blur(6px);
+  overflow-y: auto;
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+.card {
+  width: min(480px, 100%);
+  padding: 32px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0 0 24px;
+  color: var(--ink-dim);
+}
+
+.fineprint {
+  margin: 20px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+.best {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+/* ---------- choices ---------- */
+
+.choice {
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  text-align: left;
+}
+
+.choice legend {
+  padding: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pool {
+  flex: 1 1 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pool strong {
+  display: block;
+  font-size: 15px;
+}
+
+.pool span {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+
+.pool:hover,
+.pill:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.pool.is-selected {
+  border-color: var(--accent);
+  background: rgba(255, 206, 0, 0.09);
+}
+
+.pill {
+  min-width: 62px;
+  padding: 9px 16px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pill.is-selected {
+  border-color: var(--accent);
+  background: rgba(255, 206, 0, 0.12);
+  color: var(--accent);
+}
+
+/* ---------- buttons ---------- */
+
+.primary {
+  width: 100%;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 600 15px/1 inherit;
+  cursor: pointer;
+  transition: filter 0.15s, opacity 0.15s;
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ghost {
+  padding: 7px 13px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ---------- HUD ---------- */
+
+.hud {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 900;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+}
+
+.hud[hidden] {
+  display: none;
+}
+
+.hud-meta {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+}
+
+.hud-score {
+  color: var(--accent);
+}
+
+.hud h2 {
+  margin: 4px 0 0;
+  font-size: 25px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.badge {
+  min-width: 23px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.badge.rer {
+  border-radius: 5px;
+}
+
+/* ---------- action bar ---------- */
+
+.actionbar {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  z-index: 900;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.actionbar[hidden] {
+  display: none;
+}
+
+.actionbar .primary {
+  width: auto;
+  min-width: 128px;
+}
+
+.hint {
+  margin: 0;
+  min-width: 180px;
+  font-size: 13.5px;
+  color: var(--ink-dim);
+}
+
+.hint[hidden],
+.result[hidden] {
+  display: none;
+}
+
+.result {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  min-width: 180px;
+}
+
+.result-rating {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.result-distance {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+.result-points {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+/* ---------- scorecard ---------- */
+
+.finalscore {
+  margin: 0 0 6px;
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.finalscore small {
+  margin-left: 6px;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink-dim);
+}
+
+.breakdown {
+  margin: 0 0 24px;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  list-style: none;
+  text-align: left;
+  border-top: 1px solid var(--edge);
+}
+
+.breakdown li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--edge);
+  font-size: 13.5px;
+}
+
+.breakdown .bd-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdown .bd-km {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown .bd-pts {
+  min-width: 54px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- map markers ---------- */
+
+.pin {
+  width: 15px;
+  height: 15px;
+  border: 2.5px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.pin.guess {
+  background: var(--bad);
+}
+
+.pin.truth {
+  background: var(--good);
+}
+
+.truth-label {
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: var(--good);
+  color: #06240f;
+  font: 700 12.5px/1.35 ui-sans-serif, system-ui, sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Leaflet ships a light attribution chip that fights the dark theme. */
+.leaflet-control-attribution {
+  background: rgba(18, 20, 26, 0.82) !important;
+  color: var(--ink-dim) !important;
+  font-size: 10.5px !important;
+}
+
+.leaflet-control-attribution a {
+  color: var(--ink-dim) !important;
+}
+
+.leaflet-bar a {
+  background: var(--panel-solid) !important;
+  border-color: var(--edge) !important;
+  color: var(--ink) !important;
+}
+
+.leaflet-bar a:hover {
+  background: #22262f !important;
+}
+
+@media (max-width: 620px) {
+  .card {
+    padding: 24px 20px;
+  }
+
+  .hud {
+    flex-wrap: wrap;
+  }
+
+  .hud h2 {
+    font-size: 21px;
+  }
+
+  .actionbar {
+    left: 14px;
+    right: 14px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    transform: none;
+  }
+
+  .actionbar .primary {
+    flex: 1 1 100%;
+  }
+}
