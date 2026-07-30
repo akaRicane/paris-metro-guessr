@@ -34,6 +34,24 @@
             <button type="button" data-rounds="5" class="pill">5</button>
             <button type="button" data-rounds="10" class="pill is-selected">10</button>
             <button type="button" data-rounds="20" class="pill">20</button>
+            <button type="button" data-rounds="dm" class="pill pill-dm">Deathmatch</button>
+          </div>
+          <div id="variant-options" class="options options-sub" hidden>
+            <button type="button" data-variant="standard" class="pill pill-dm is-selected">
+              Standard
+            </button>
+            <button type="button" data-variant="burn" class="pill pill-dm">Burn</button>
+          </div>
+          <p class="choice-note" id="rounds-note" hidden></p>
+        </fieldset>
+
+        <fieldset class="choice">
+          <legend>Time per round</legend>
+          <div id="timer-options" class="options">
+            <button type="button" data-time="" class="pill is-selected">No limit</button>
+            <button type="button" data-time="60" class="pill">60s</button>
+            <button type="button" data-time="30" class="pill">30s</button>
+            <button type="button" data-time="10" class="pill">10s</button>
           </div>
         </fieldset>
 
@@ -52,6 +70,10 @@
         <div class="hud-meta">
           <span id="round-label">Round 1 / 10</span>
           <span class="hud-score" id="score-label">0 pts</span>
+          <span class="hud-timer" id="timer-label" role="timer" aria-live="off" hidden></span>
+        </div>
+        <div class="lifebar" id="lifebar" hidden>
+          <i id="lifebar-fill"></i>
         </div>
         <h2 id="station-name">—</h2>
         <div class="badges" id="station-lines"></div>
@@ -75,7 +97,7 @@
     <!-- Final scorecard -->
     <div class="overlay" id="end-screen" hidden>
       <div class="card">
-        <h1>Final score</h1>
+        <h1 id="end-title">Final score</h1>
         <p class="finalscore"><span id="final-score">0</span><small id="final-max"></small></p>
         <p class="tagline" id="final-verdict"></p>
         <ol class="breakdown" id="breakdown"></ol>

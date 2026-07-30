@@ -15,13 +15,19 @@
     startScreen: el("start-screen"),
     poolOptions: el("pool-options"),
     roundOptions: el("round-options"),
+    variantOptions: el("variant-options"),
+    roundsNote: el("rounds-note"),
     startBtn: el("start-btn"),
     bestLine: el("best-line"),
     hud: el("hud"),
     roundLabel: el("round-label"),
     scoreLabel: el("score-label"),
+    lifebar: el("lifebar"),
+    lifebarFill: el("lifebar-fill"),
     stationName: el("station-name"),
     stationLines: el("station-lines"),
+    timerLabel: el("timer-label"),
+    timerOptions: el("timer-options"),
     quitBtn: el("quit-btn"),
     actionbar: el("actionbar"),
     hint: el("hint"),
@@ -31,6 +37,7 @@
     resultPoints: el("result-points"),
     confirmBtn: el("confirm-btn"),
     endScreen: el("end-screen"),
+    endTitle: el("end-title"),
     finalScore: el("final-score"),
     finalMax: el("final-max"),
     finalVerdict: el("final-verdict"),
@@ -41,7 +48,23 @@
   let map;
   let layers = { guess: null, truth: null, link: null, label: null };
   let game = null;
-  let settings = { pool: "metro", rounds: 10 };
+  let settings = {
+    pool: "metro",
+    rounds: 10,
+    timeLimit: null,
+    deathmatch: false,
+    variant: "standard",
+  };
+  let clock = { handle: null, deadline: 0, last: 0 };
+
+  const VARIANT_NOTES = {
+    standard:
+      "20 000 life points. Every round costs you the points you missed — a " +
+      "perfect pin is free, a wild one is 5 000. Last as long as you can.",
+    burn:
+      "10 000 life points, draining 100 every second. The miss still costs you " +
+      "the same, but answering a station pays 1 000 back. Pin well, and quickly.",
+  };
 
   // ---------- map ----------
 
@@ -100,6 +123,61 @@
     });
   }
 
+  // ---------- round clock ----------
+
+  function stopClock() {
+    if (clock.handle) clearInterval(clock.handle);
+    clock.handle = null;
+    ui.timerLabel.hidden = true;
+    ui.timerLabel.classList.remove("is-urgent");
+  }
+
+  function startClock() {
+    stopClock();
+    // Burn needs the tick even untimed - the tick is what drains the bar.
+    if (!game.timeLimit && !game.isBurning) return;
+
+    // Tick against a wall-clock deadline rather than counting down a variable.
+    // setInterval drifts, and browsers throttle it hard in a background tab -
+    // a decremented counter would hand back free seconds for looking away.
+    clock.deadline = Date.now() + (game.timeLimit ?? 0) * 1000;
+    clock.last = Date.now();
+    ui.timerLabel.hidden = !game.timeLimit;
+    paintClock();
+    clock.handle = setInterval(paintClock, 200);
+  }
+
+  function paintClock() {
+    const now = Date.now();
+    const sinceLastTick = now - clock.last;
+    clock.last = now;
+
+    // Charged off the elapsed wall clock for the same reason as the countdown:
+    // a throttled tab must not come back with a fuller bar than it left with.
+    if (game.isBurning) {
+      const burntOut = game.drain(sinceLastTick / 1000);
+      paintTally();
+      if (burntOut) {
+        stopClock();
+        const result = game.expire("Burnt out");
+        if (result) showReveal(result);
+        return;
+      }
+    }
+
+    if (!game.timeLimit) return;
+
+    const remaining = Math.max(0, clock.deadline - now);
+    ui.timerLabel.textContent = `${Math.ceil(remaining / 1000)}s`;
+    ui.timerLabel.classList.toggle("is-urgent", remaining <= 5000);
+
+    if (remaining <= 0) {
+      stopClock();
+      const result = game.expire();
+      if (result) showReveal(result);
+    }
+  }
+
   // ---------- round flow ----------
 
   function onMapClick(ev) {
@@ -113,12 +191,43 @@
     ui.hint.textContent = "Drop again to move it, or lock in your guess.";
   }
 
+  // What a deathmatch round did to the bar. Burn's restore can outweigh the
+  // miss, and the round the drain killed you on charged you nothing extra.
+  function deathmatchDelta(result, suffix = "") {
+    if (result.burntOut) return "—";
+    const sign = result.damage > 0 ? "−" : "+";
+    return `${sign}${Math.abs(result.damage).toLocaleString("en")}${suffix}`;
+  }
+
+  // The HUD counter is points banked in a normal game, life left in deathmatch.
+  function paintTally() {
+    if (!game.deathmatch) {
+      ui.scoreLabel.textContent = `${game.totalScore.toLocaleString("en")} pts`;
+      ui.scoreLabel.classList.remove("is-critical");
+      ui.lifebar.hidden = true;
+      return;
+    }
+    const left = game.hp / game.startHp;
+    // Burn drains fractionally between ticks; nobody wants to read 9 342.4 HP.
+    ui.scoreLabel.textContent = `${Math.round(game.hp).toLocaleString("en")} HP`;
+    ui.scoreLabel.classList.toggle("is-critical", left <= 0.25);
+    ui.lifebar.hidden = false;
+    // Ease the step in a standard game; track the drain in burn, where the bar
+    // moves every tick and easing would just lag behind the truth.
+    ui.lifebar.classList.toggle("is-draining", game.isBurning);
+    ui.lifebarFill.style.width = `${left * 100}%`;
+    ui.lifebarFill.classList.toggle("is-low", left <= 0.5);
+    ui.lifebarFill.classList.toggle("is-critical", left <= 0.25);
+  }
+
   function startRound() {
     clearLayers();
     const station = game.station;
 
-    ui.roundLabel.textContent = `Round ${game.roundNumber} / ${game.rounds}`;
-    ui.scoreLabel.textContent = `${game.totalScore.toLocaleString("en")} pts`;
+    ui.roundLabel.textContent = game.deathmatch
+      ? `Station ${game.roundNumber}`
+      : `Round ${game.roundNumber} / ${game.rounds}`;
+    paintTally();
     ui.stationName.textContent = station.name;
     renderBadges(ui.stationLines, station);
 
@@ -133,22 +242,15 @@
     // would otherwise hand out a free hint about where we are.
     const view = window.POOLS[game.poolKey].view;
     map.setView(view.center, view.zoom, { animate: false });
+
+    startClock();
   }
 
-  function revealRound() {
-    const result = game.submit();
-    if (!result) return;
+  function showReveal(result) {
+    stopClock();
 
     const truth = L.latLng(result.station.lat, result.station.lon);
-    const guess = L.latLng(result.guess.lat, result.guess.lon);
-
     layers.truth = dot(truth, "truth");
-    layers.link = L.polyline([guess, truth], {
-      color: "#1f2430", // dark: the basemap under it is light
-      weight: 2.5,
-      opacity: 0.8,
-      dashArray: "5 7",
-    }).addTo(map);
     layers.label = L.marker(truth, {
       icon: L.divIcon({
         className: "",
@@ -160,19 +262,51 @@
       keyboard: false,
     }).addTo(map);
 
-    map.fitBounds(L.latLngBounds([guess, truth]), {
-      paddingTopLeft: [70, 150],
-      paddingBottomRight: [70, 130],
-      maxZoom: 15,
-    });
+    // A round that timed out with no pin has nothing to join up or measure.
+    if (result.guess) {
+      const guess = L.latLng(result.guess.lat, result.guess.lon);
+      layers.link = L.polyline([guess, truth], {
+        color: "#1f2430", // dark: the basemap under it is light
+        weight: 2.5,
+        opacity: 0.8,
+        dashArray: "5 7",
+      }).addTo(map);
+      map.fitBounds(L.latLngBounds([guess, truth]), {
+        paddingTopLeft: [70, 150],
+        paddingBottomRight: [70, 130],
+        maxZoom: 15,
+      });
+    } else {
+      map.setView(truth, 14, { animate: true });
+    }
 
     ui.hint.hidden = true;
     ui.result.hidden = false;
     ui.resultRating.textContent = result.rating;
-    ui.resultDistance.textContent = window.formatDistance(result.km);
-    ui.resultPoints.textContent = `+${result.score.toLocaleString("en")}`;
-    ui.scoreLabel.textContent = `${game.totalScore.toLocaleString("en")} pts`;
-    ui.confirmBtn.textContent = game.isOver ? "See results" : "Next station";
+    ui.resultDistance.textContent =
+      result.km === null ? "no guess" : window.formatDistance(result.km);
+    // Deathmatch reports what the round cost you, not what it earned - and in
+    // burn a sharp pin can cost less than the 1000 restore, i.e. heal you.
+    ui.resultPoints.textContent = game.deathmatch
+      ? deathmatchDelta(result, " HP")
+      : `+${result.score.toLocaleString("en")}`;
+    ui.resultPoints.classList.toggle(
+      "is-damage",
+      game.deathmatch && !result.burntOut && result.damage > 0
+    );
+    ui.resultPoints.classList.toggle(
+      "is-heal",
+      game.deathmatch && !result.burntOut && result.damage <= 0
+    );
+    paintTally();
+    // Running the whole pool dry is also game over, but it isn't dying.
+    ui.confirmBtn.textContent = !game.isOver
+      ? "Next station"
+      : game.deathmatch && game.hp <= 0
+      ? game.isBurning
+        ? "Burnt out"
+        : "You died"
+      : "See results";
     ui.confirmBtn.disabled = false;
     ui.map.classList.remove("is-guessing");
   }
@@ -180,7 +314,8 @@
   function onConfirm() {
     if (!game) return;
     if (!game.isRevealed) {
-      revealRound();
+      const result = game.submit();
+      if (result) showReveal(result);
     } else if (game.isOver) {
       showEndScreen();
     } else {
@@ -219,7 +354,15 @@
         `<span>${count} stations · ${escapeHtml(pool.blurb)}</span>`;
       ui.poolOptions.appendChild(btn);
     });
+    renderDeathmatch();
     renderBest();
+  }
+
+  // The variant picker and its rules blurb only exist inside deathmatch.
+  function renderDeathmatch() {
+    ui.variantOptions.hidden = !settings.deathmatch;
+    ui.roundsNote.hidden = !settings.deathmatch;
+    ui.roundsNote.textContent = VARIANT_NOTES[settings.variant];
   }
 
   function selectIn(container, selector, chosen) {
@@ -235,8 +378,14 @@
       ui.bestLine.hidden = true;
       return;
     }
-    const pct = Math.round((entry.score / entry.max) * 100);
     ui.bestLine.hidden = false;
+    if (settings.deathmatch) {
+      ui.bestLine.textContent = `Best on this setup: survived ${entry.survived} station${
+        entry.survived === 1 ? "" : "s"
+      }`;
+      return;
+    }
+    const pct = Math.round((entry.score / entry.max) * 100);
     ui.bestLine.textContent = `Best on this setup: ${entry.score.toLocaleString(
       "en"
     )} / ${entry.max.toLocaleString("en")} (${pct}%)`;
@@ -252,6 +401,7 @@
   }
 
   function showEndScreen() {
+    stopClock();
     clearLayers();
     ui.hud.hidden = true;
     ui.actionbar.hidden = true;
@@ -259,30 +409,61 @@
 
     const total = game.totalScore;
     const max = game.maxScore;
-    const pct = Math.round((total / max) * 100);
+    const pct = max ? Math.round((total / max) * 100) : 0;
 
-    ui.finalScore.textContent = total.toLocaleString("en");
-    ui.finalMax.textContent = `/ ${max.toLocaleString("en")}`;
-    ui.finalVerdict.textContent = verdictFor(pct);
+    if (game.deathmatch) {
+      // Surviving the entire pool is a different sentence from bleeding out.
+      ui.endTitle.textContent = !game.hp
+        ? game.isBurning
+          ? "You burnt out"
+          : "You died"
+        : "You cleared the network";
+      ui.finalScore.textContent = String(game.survived);
+      ui.finalMax.textContent = game.survived === 1 ? "station" : "stations";
+      ui.finalVerdict.textContent = deathmatchVerdictFor(game.survived, game.variant);
+    } else {
+      ui.endTitle.textContent = "Final score";
+      ui.finalScore.textContent = total.toLocaleString("en");
+      ui.finalMax.textContent = `/ ${max.toLocaleString("en")}`;
+      ui.finalVerdict.textContent = verdictFor(pct);
+    }
 
-    const avgKm = game.results.reduce((s, r) => s + r.km, 0) / game.results.length;
     ui.breakdown.textContent = "";
     game.results.forEach((r) => {
       const li = document.createElement("li");
       li.innerHTML =
         `<span class="bd-name">${escapeHtml(r.station.name)}</span>` +
-        `<span class="bd-km">${window.formatDistance(r.km)}</span>` +
-        `<span class="bd-pts">${r.score.toLocaleString("en")}</span>`;
+        `<span class="bd-km">${
+          r.km === null ? "out of time" : window.formatDistance(r.km)
+        }</span>` +
+        `<span class="bd-pts${
+          !game.deathmatch || r.burntOut ? "" : r.damage > 0 ? " is-damage" : " is-heal"
+        }">${
+          game.deathmatch ? deathmatchDelta(r) : r.score.toLocaleString("en")
+        }</span>`;
       ui.breakdown.appendChild(li);
     });
+
+    // Averaged over answered rounds only. Folding a timeout in as a zero-km miss
+    // would read as a perfect guess and flatter the average.
+    const answered = game.results.filter((r) => r.km !== null);
+    const timedOut = game.results.length - answered.length;
     const summary = document.createElement("li");
     summary.innerHTML =
-      `<span class="bd-name"><em>Average miss</em></span>` +
-      `<span class="bd-km">${window.formatDistance(avgKm)}</span>` +
+      `<span class="bd-name"><em>Average miss${
+        timedOut ? ` (${timedOut} timed out)` : ""
+      }</em></span>` +
+      `<span class="bd-km">${
+        answered.length
+          ? window.formatDistance(
+              answered.reduce((s, r) => s + r.km, 0) / answered.length
+            )
+          : "—"
+      }</span>` +
       `<span class="bd-pts">${pct}%</span>`;
     ui.breakdown.appendChild(summary);
 
-    saveBest(total, max);
+    saveBest();
     ui.endScreen.hidden = false;
   }
 
@@ -295,9 +476,39 @@
     return "Consider buying a paper map.";
   }
 
+  // Standard: 20 000 HP against a 5000-point round, so averaging a 1 km miss
+  // buys about 12 stations and 400 m buys about 26. Burn runs shorter - half the
+  // bar, and the clock takes its cut whether you pin well or not.
+  const DEATHMATCH_VERDICTS = {
+    standard: [
+      [50, "Fifty stations deep. You are the map."],
+      [30, "A serious run. The suburbs didn't scare you."],
+      [18, "Strong. You died somewhere past the périph."],
+      [10, "Respectable. Two bad pins cost you the run."],
+      [5, "Bled out early. The outskirts got you."],
+      [0, "Barely left Châtelet."],
+    ],
+    burn: [
+      [30, "Thirty under the drain. Frightening."],
+      [18, "Fast and accurate. Very few last this long."],
+      [12, "Strong run — you were still gaining ground on the clock."],
+      [7, "Solid. The drain caught you in the suburbs."],
+      [4, "The clock beat you before the map did."],
+      [0, "Burnt out at the gates."],
+    ],
+  };
+
+  function deathmatchVerdictFor(survived, variant) {
+    const table = DEATHMATCH_VERDICTS[variant] ?? DEATHMATCH_VERDICTS.standard;
+    return table.find(([floor]) => survived >= floor)[1];
+  }
+
   // ---------- best score ----------
 
-  const bestKeyFor = (s) => `${s.pool}:${s.rounds}`;
+  // The clock changes the game enough that scores aren't comparable across it,
+  // so a 10s run gets its own record rather than competing with an untimed one.
+  const bestKeyFor = (s) =>
+    `${s.pool}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:${s.timeLimit ?? "free"}`;
 
   function readBest() {
     try {
@@ -307,16 +518,33 @@
     }
   }
 
-  function saveBest(score, max) {
+  function saveBest() {
     const best = readBest();
     const key = bestKeyFor(settings);
-    if (!best[key] || score > best[key].score) {
-      best[key] = { score, max };
-      try {
-        localStorage.setItem(BEST_KEY, JSON.stringify(best));
-      } catch {
-        /* storage unavailable - the score just won't persist */
+    const previous = best[key];
+
+    let entry;
+    if (game.deathmatch) {
+      // Stations survived is the score; life left breaks a tie between two runs
+      // that got equally far.
+      entry = { survived: game.survived, hp: game.hp };
+      if (
+        previous &&
+        (previous.survived > entry.survived ||
+          (previous.survived === entry.survived && (previous.hp ?? 0) >= entry.hp))
+      ) {
+        return;
       }
+    } else {
+      entry = { score: game.totalScore, max: game.maxScore };
+      if (previous && previous.score >= entry.score) return;
+    }
+
+    best[key] = entry;
+    try {
+      localStorage.setItem(BEST_KEY, JSON.stringify(best));
+    } catch {
+      /* storage unavailable - the score just won't persist */
     }
   }
 
@@ -340,8 +568,28 @@
   ui.roundOptions.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".pill");
     if (!btn) return;
-    settings.rounds = Number(btn.dataset.rounds);
+    settings.deathmatch = btn.dataset.rounds === "dm";
+    // Keep the last numeric choice, so flipping out of deathmatch lands back on it.
+    if (!settings.deathmatch) settings.rounds = Number(btn.dataset.rounds);
     selectIn(ui.roundOptions, ".pill", btn);
+    renderDeathmatch();
+    renderBest();
+  });
+
+  ui.variantOptions.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".pill");
+    if (!btn) return;
+    settings.variant = btn.dataset.variant;
+    selectIn(ui.variantOptions, ".pill", btn);
+    renderDeathmatch();
+    renderBest();
+  });
+
+  ui.timerOptions.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".pill");
+    if (!btn) return;
+    settings.timeLimit = btn.dataset.time ? Number(btn.dataset.time) : null;
+    selectIn(ui.timerOptions, ".pill", btn);
     renderBest();
   });
 
@@ -353,6 +601,7 @@
   });
   ui.confirmBtn.addEventListener("click", onConfirm);
   ui.quitBtn.addEventListener("click", () => {
+    stopClock();
     game = null;
     clearLayers();
     ui.hud.hidden = true;
