@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Paris Métro Guessr</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -18,51 +19,107 @@
     <!-- Start screen -->
     <div class="overlay" id="start-screen">
       <div class="card">
+        <!-- Language is not a game setting, so it sits above the choices rather
+             than in the fieldset stack. -->
+        <div class="langswitch" id="lang-options">
+          <button type="button" data-lang="en" class="lang">EN</button>
+          <button type="button" data-lang="fr" class="lang">FR</button>
+        </div>
         <h1>Paris Métro Guessr</h1>
-        <p class="tagline">
+        <p class="tagline" data-i18n="start.tagline">
           A station is named. Pin it on the map. The closer you land, the more you score.
         </p>
 
         <fieldset class="choice">
-          <legend>Network</legend>
+          <legend data-i18n="legend.network">Network</legend>
           <div id="pool-options" class="options"></div>
         </fieldset>
 
         <fieldset class="choice">
-          <legend>Rounds</legend>
+          <legend data-i18n="legend.rounds">Rounds</legend>
           <div id="round-options" class="options">
             <button type="button" data-rounds="5" class="pill">5</button>
             <button type="button" data-rounds="10" class="pill is-selected">10</button>
             <button type="button" data-rounds="20" class="pill">20</button>
-            <button type="button" data-rounds="dm" class="pill pill-dm">Deathmatch</button>
+            <button type="button" data-rounds="dm" class="pill pill-dm" data-i18n="rounds.deathmatch">
+              Deathmatch
+            </button>
           </div>
           <div id="variant-options" class="options options-sub" hidden>
-            <button type="button" data-variant="standard" class="pill pill-dm is-selected">
+            <button
+              type="button"
+              data-variant="standard"
+              class="pill pill-dm is-selected"
+              data-i18n="variant.standard"
+            >
               Standard
             </button>
-            <button type="button" data-variant="burn" class="pill pill-dm">Burn</button>
+            <button type="button" data-variant="burn" class="pill pill-dm" data-i18n="variant.burn">
+              Burn
+            </button>
           </div>
           <p class="choice-note" id="rounds-note" hidden></p>
         </fieldset>
 
         <fieldset class="choice">
-          <legend>Time per round</legend>
+          <legend data-i18n="legend.difficulty">Difficulty</legend>
+          <div id="difficulty-options" class="options">
+            <button type="button" data-easy="" class="pill is-selected" data-i18n="difficulty.standard">
+              Standard
+            </button>
+            <button type="button" data-easy="1" class="pill" data-i18n="difficulty.easy">Easy</button>
+          </div>
+          <p class="choice-note" id="difficulty-note" hidden data-i18n="difficulty.note">
+            The network is drawn on the map while you guess. You still have to
+            know which station is which, but the lines tell you where to look.
+          </p>
+        </fieldset>
+
+        <fieldset class="choice">
+          <legend data-i18n="legend.timer">Time per round</legend>
           <div id="timer-options" class="options">
-            <button type="button" data-time="" class="pill is-selected">No limit</button>
+            <button type="button" data-time="" class="pill is-selected" data-i18n="timer.none">
+              No limit
+            </button>
             <button type="button" data-time="60" class="pill">60s</button>
             <button type="button" data-time="30" class="pill">30s</button>
             <button type="button" data-time="10" class="pill">10s</button>
           </div>
         </fieldset>
 
-        <button type="button" id="start-btn" class="primary">Start playing</button>
+        <button type="button" id="start-btn" class="primary" data-i18n="start.play">
+          Start playing
+        </button>
+        <button type="button" id="demo-btn" class="ghost wide" data-i18n="start.demo">
+          Preview basemaps
+        </button>
         <p class="best" id="best-line" hidden></p>
-        <p class="fineprint">
+        <p class="fineprint" data-i18n="start.fineprint">
           Station data from Île-de-France Mobilités open data (ODbL). The basemap
           deliberately carries no place labels.
         </p>
       </div>
     </div>
+
+    <!-- Basemap preview -->
+    <aside class="demo" id="demo" hidden>
+      <div class="demo-head">
+        <strong data-i18n="demo.title">Basemap preview</strong>
+        <button type="button" id="demo-close" class="ghost" data-i18n="demo.back">Back</button>
+      </div>
+      <div class="options" id="demo-layers"></div>
+      <p class="demo-note" id="demo-note"></p>
+      <div class="demo-meta">
+        <span id="demo-zoom" class="demo-zoom">z13</span>
+        <button type="button" id="demo-pin" class="ghost" data-i18n="demo.pin">
+          Drop a sample reveal
+        </button>
+      </div>
+      <p class="demo-hint" data-i18n="demo.hint">
+        Zoom past z17 and pan around: any style that prints a station name is
+        unusable. Esc goes back.
+      </p>
+    </aside>
 
     <!-- In-game HUD -->
     <header class="hud" id="hud" hidden>
@@ -78,12 +135,21 @@
         <h2 id="station-name">—</h2>
         <div class="badges" id="station-lines"></div>
       </div>
-      <button type="button" id="quit-btn" class="ghost" title="Abandon this game">Quit</button>
+      <button
+        type="button"
+        id="quit-btn"
+        class="ghost"
+        title="Abandon this game"
+        data-i18n="hud.quit"
+        data-i18n-title="hud.quitTitle"
+      >
+        Quit
+      </button>
     </header>
 
     <!-- Bottom action bar -->
     <div class="actionbar" id="actionbar" hidden>
-      <p class="hint" id="hint" role="status" aria-live="polite">
+      <p class="hint" id="hint" role="status" aria-live="polite" data-i18n="hint.place">
         Click the map to drop your pin.
       </p>
       <div class="result" id="result" hidden>
@@ -91,7 +157,9 @@
         <span class="result-distance" id="result-distance"></span>
         <span class="result-points" id="result-points"></span>
       </div>
-      <button type="button" id="confirm-btn" class="primary" disabled>Guess</button>
+      <button type="button" id="confirm-btn" class="primary" disabled data-i18n="confirm.guess">
+        Guess
+      </button>
     </div>
 
     <!-- Final scorecard -->
@@ -101,7 +169,9 @@
         <p class="finalscore"><span id="final-score">0</span><small id="final-max"></small></p>
         <p class="tagline" id="final-verdict"></p>
         <ol class="breakdown" id="breakdown"></ol>
-        <button type="button" id="again-btn" class="primary">Play again</button>
+        <button type="button" id="again-btn" class="primary" data-i18n="end.again">
+          Play again
+        </button>
       </div>
     </div>
 
@@ -111,7 +181,9 @@
       crossorigin=""
     ></script>
     <script src="data/stations.js"></script>
+    <script src="data/lines.js"></script>
     <script src="js/lines.js"></script>
+    <script src="js/i18n.js"></script>
     <script src="js/geo.js"></script>
     <script src="js/game.js"></script>
     <script src="js/app.js"></script>

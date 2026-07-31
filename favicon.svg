@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Métro roundel -->
+  <circle cx="32" cy="32" r="30" fill="#0a5c3a"/>
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#f5c518" stroke-width="4"/>
+
+  <!-- Eiffel Tower silhouette -->
+  <g fill="#f5c518">
+    <!-- top spire -->
+    <rect x="30.7" y="10" width="2.6" height="8" rx="0.6"/>
+    <!-- upper tapering shaft -->
+    <path d="M30 18 h4 l1.2 12 h-6.4 z"/>
+    <!-- second-deck platform -->
+    <rect x="26.3" y="30" width="11.4" height="2.4" rx="0.5"/>
+    <!-- lower legs (curved) -->
+    <path d="M28.6 32.4
+             C 27.4 40, 24.5 47, 20 54
+             l 4.4 0
+             C 27 49, 29.4 44.5, 31 40
+             l 0 -7.6 z"/>
+    <path d="M35.4 32.4
+             C 36.6 40, 39.5 47, 44 54
+             l -4.4 0
+             C 37 49, 34.6 44.5, 33 40
+             l 0 -7.6 z"/>
+    <!-- first-deck arch bar -->
+    <rect x="25" y="41" width="14" height="2.2" rx="0.5"/>
+    <!-- ground base ticks -->
+    <rect x="18.5" y="53.5" width="6" height="2.4" rx="0.6"/>
+    <rect x="39.5" y="53.5" width="6" height="2.4" rx="0.6"/>
+  </g>
+</svg>

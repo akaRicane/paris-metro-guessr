@@ -21,19 +21,28 @@ window.scoreFor = function (km) {
   return Math.round(window.MAX_ROUND_SCORE * Math.exp(-km / 2.5));
 };
 
+// Units are the same in both languages; the decimal separator is not, so the
+// figure goes through the locale rather than through toFixed.
 window.formatDistance = function (km) {
+  const decimals = (n, d) =>
+    n.toLocaleString(window.numberLocale(), {
+      minimumFractionDigits: d,
+      maximumFractionDigits: d,
+    });
   if (km < 1) return `${Math.round(km * 1000)} m`;
-  if (km < 10) return `${km.toFixed(2)} km`;
-  return `${km.toFixed(1)} km`;
+  if (km < 10) return `${decimals(km, 2)} km`;
+  return `${decimals(km, 1)} km`;
 };
 
+// A key, not a sentence: the rating is stored on the result and rendered much
+// later, so it has to survive without committing to a language.
 window.ratingFor = function (km) {
-  if (km < 0.15) return "Bang on";
-  if (km < 0.4) return "Superb";
-  if (km < 0.8) return "Excellent";
-  if (km < 1.5) return "Solid";
-  if (km < 3) return "Not bad";
-  if (km < 6) return "Wide";
-  if (km < 15) return "Lost";
-  return "Wrong arrondissement entirely";
+  if (km < 0.15) return "rating.bangOn";
+  if (km < 0.4) return "rating.superb";
+  if (km < 0.8) return "rating.excellent";
+  if (km < 1.5) return "rating.solid";
+  if (km < 3) return "rating.notBad";
+  if (km < 6) return "rating.wide";
+  if (km < 15) return "rating.lost";
+  return "rating.wrongArrondissement";
 };

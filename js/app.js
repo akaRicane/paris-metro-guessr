@@ -9,15 +9,77 @@
   // Panning off to Normandy has no gameplay value and just gets you lost.
   const REGION_BOUNDS = L.latLngBounds([48.0, 1.6], [49.4, 3.3]);
 
+  // The game stops short of the tile ceiling: past this you are reading kerbs.
+  const GAME_MAX_ZOOM = 17;
+
+  const CARTO_ATTR =
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
+    '&copy; <a href="https://carto.com/attributions">CARTO</a> &middot; ' +
+    "stations: Île-de-France Mobilités (ODbL)";
+  const ESRI_ATTR =
+    "Imagery &copy; Esri, Maxar, Earthstar Geographics &middot; " +
+    "stations: Île-de-France Mobilités (ODbL)";
+
+  // Every basemap here was checked against a z15 tile over Châtelet: a style
+  // that prints one place name hands over the answer, so "nolabels" in the slug
+  // is not enough on its own. Esri's Canvas Light/Dark Gray look like obvious
+  // candidates and are disqualified - they bake park and district names into the
+  // tiles. Stadia's Stamen styles need an API key (401 without one).
+  const BASEMAPS = {
+    voyager: {
+      label: "Voyager",
+      blurb: "Colour. Blue Seine, green parks, yellow arterials — the fairest read.",
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
+      options: { subdomains: "abcd", maxZoom: 20, attribution: CARTO_ATTR },
+    },
+    light: {
+      label: "Positron",
+      blurb: "Near-white. The Seine barely registers, so you navigate on street grain.",
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}{r}.png",
+      options: { subdomains: "abcd", maxZoom: 20, attribution: CARTO_ATTR },
+    },
+    dark: {
+      label: "Dark Matter",
+      blurb: "Same geometry as Positron, inverted. Easy on the eyes, low contrast.",
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}{r}.png",
+      options: { subdomains: "abcd", maxZoom: 20, attribution: CARTO_ATTR },
+    },
+    satellite: {
+      // Esri wants {y} before {x}; Leaflet substitutes by name, so it just works.
+      label: "Satellite",
+      blurb: "Esri imagery. No cartography at all — rooflines, rail yards, parks.",
+      url:
+        "https://server.arcgisonline.com/ArcGIS/rest/services/" +
+        "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      options: { maxZoom: 19, attribution: ESRI_ATTR },
+    },
+  };
+
+  const SHOW_BASEMAP_DEMO_OPTIONS = false;
+  const GAME_BASEMAP = "voyager";
+
+  const t = window.t;
+  const fmtNum = window.fmtNum;
+
   const el = (id) => document.getElementById(id);
   const ui = {
     map: el("map"),
     startScreen: el("start-screen"),
+    langOptions: el("lang-options"),
     poolOptions: el("pool-options"),
     roundOptions: el("round-options"),
     variantOptions: el("variant-options"),
+    difficultyOptions: el("difficulty-options"),
+    difficultyNote: el("difficulty-note"),
     roundsNote: el("rounds-note"),
     startBtn: el("start-btn"),
+    demoBtn: el("demo-btn"),
+    demo: el("demo"),
+    demoLayers: el("demo-layers"),
+    demoNote: el("demo-note"),
+    demoZoom: el("demo-zoom"),
+    demoPin: el("demo-pin"),
+    demoClose: el("demo-close"),
     bestLine: el("best-line"),
     hud: el("hud"),
     roundLabel: el("round-label"),
@@ -46,7 +108,10 @@
   };
 
   let map;
-  let layers = { guess: null, truth: null, link: null, label: null };
+  let basemapLayer = null;
+  let basemapKey = GAME_BASEMAP;
+  let layers = { guess: null, truth: null, link: null, label: null, lines: null };
+  let networkLayer = null; // easy mode's backdrop, outside the per-round layers
   let game = null;
   let settings = {
     pool: "metro",
@@ -54,17 +119,22 @@
     timeLimit: null,
     deathmatch: false,
     variant: "standard",
+    easy: false,
   };
   let clock = { handle: null, deadline: 0, last: 0 };
 
-  const VARIANT_NOTES = {
-    standard:
-      "20 000 life points. Every round costs you the points you missed — a " +
-      "perfect pin is free, a wild one is 5 000. Last as long as you can.",
-    burn:
-      "10 000 life points, draining 100 every second. The miss still costs you " +
-      "the same, but answering a station pays 1 000 back. Pin well, and quickly.",
-  };
+  // The figures come from the rules rather than from the copy, so the numbers in
+  // the blurb can't drift from the ones the game actually charges - and they
+  // pick up the locale's thousands separator on the way through.
+  function variantNote(key) {
+    const rules = window.DEATHMATCH_VARIANTS[key];
+    return t(`variant.note.${key}`, {
+      hp: fmtNum(rules.hp),
+      max: fmtNum(window.MAX_ROUND_SCORE),
+      drain: fmtNum(rules.drainPerSecond),
+      restore: fmtNum(rules.restore),
+    });
+  }
 
   // ---------- map ----------
 
@@ -73,7 +143,7 @@
       center: window.POOLS.metro.view.center,
       zoom: window.POOLS.metro.view.zoom,
       minZoom: 9,
-      maxZoom: 17,
+      maxZoom: GAME_MAX_ZOOM,
       maxBounds: REGION_BOUNDS,
       maxBoundsViscosity: 0.85,
       zoomControl: true,
@@ -81,24 +151,29 @@
     });
 
     // A labelled basemap would print the station names straight onto the board,
-    // so this uses Carto's no-label raster - verified label-free through z17.
-    // Voyager over the darker variants because you need to actually read the
-    // city: blue Seine, green parks, yellow arterials, grey rail corridors are
-    // the only cues you get, and that is the whole game.
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
-      {
-        subdomains: "abcd",
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
-          '&copy; <a href="https://carto.com/attributions">CARTO</a> &middot; ' +
-          "stations: Île-de-France Mobilités (ODbL)",
-      }
-    ).addTo(map);
+    // so the game runs on Carto's no-label voyager raster. Voyager over the
+    // paler variants because you need to actually read the city: blue Seine,
+    // green parks, yellow arterials, grey rail corridors are the only cues you
+    // get, and that is the whole game.
+    setBasemap(GAME_BASEMAP);
 
     map.on("click", onMapClick);
+    map.on("zoomend", paintDemoZoom);
     document.getElementById("map").removeAttribute("aria-hidden");
+  }
+
+  /**
+   * Swap the basemap. A fresh layer rather than tiles.setUrl(): each provider
+   * carries its own attribution and zoom ceiling, and setUrl would leave the
+   * credit in the corner pointing at the wrong company.
+   */
+  function setBasemap(key, { maxZoom = GAME_MAX_ZOOM } = {}) {
+    const basemap = BASEMAPS[key];
+    if (!basemap) return;
+    basemapKey = key;
+    if (basemapLayer) map.removeLayer(basemapLayer);
+    basemapLayer = L.tileLayer(basemap.url, basemap.options).addTo(map);
+    map.setMaxZoom(Math.min(maxZoom, basemap.options.maxZoom));
   }
 
   function dot(latlng, kind) {
@@ -112,6 +187,80 @@
       keyboard: false,
       interactive: false,
     }).addTo(map);
+  }
+
+  // ---------- network geometry ----------
+
+  const colorOf = (segment) => window.LINE_COLORS[segment.kind][segment.line] || "#666";
+
+  /**
+   * The lines a pool plays on. Métro-only games have no business showing the
+   * RER out to Melun, and the RER game shouldn't sketch the métro underneath it.
+   */
+  function segmentsForPool(poolKey) {
+    if (poolKey === "metro") return window.LINES.filter((s) => s.kind === "metro");
+    if (poolKey === "rer") return window.LINES.filter((s) => s.kind === "rer");
+    return window.LINES;
+  }
+
+  function segmentsForStation(station) {
+    return window.LINES.filter(
+      (s) =>
+        (s.kind === "metro" && station.metro.includes(s.line)) ||
+        (s.kind === "rer" && station.rer.includes(s.line))
+    );
+  }
+
+  /**
+   * Easy mode's backdrop: the whole pool, thin and half-transparent so it reads
+   * as a hint rather than as the answer. Built once per game and left on the map
+   * between rounds - 660 polylines is not something to rebuild every round.
+   */
+  function showNetwork(poolKey) {
+    hideNetwork();
+    networkLayer = L.layerGroup(
+      segmentsForPool(poolKey).map((s) =>
+        L.polyline(s.pts, {
+          color: colorOf(s),
+          weight: 2.5,
+          opacity: 0.5,
+          interactive: false,
+        })
+      )
+    ).addTo(map);
+  }
+
+  function hideNetwork() {
+    if (networkLayer) map.removeLayer(networkLayer);
+    networkLayer = null;
+  }
+
+  /**
+   * The reveal's teaching moment: the lines that actually serve this station,
+   * full strength over a white casing so they hold up on satellite and on the
+   * pale basemaps alike.
+   */
+  function drawStationLines(station) {
+    const segments = segmentsForStation(station);
+    if (!segments.length) return null;
+
+    const casing = segments.map((s) =>
+      L.polyline(s.pts, {
+        color: "#ffffff",
+        weight: 7,
+        opacity: 0.55,
+        interactive: false,
+      })
+    );
+    const strokes = segments.map((s) =>
+      L.polyline(s.pts, {
+        color: colorOf(s),
+        weight: 4,
+        opacity: 0.95,
+        interactive: false,
+      })
+    );
+    return L.layerGroup([...casing, ...strokes]).addTo(map);
   }
 
   function clearLayers() {
@@ -159,7 +308,7 @@
       paintTally();
       if (burntOut) {
         stopClock();
-        const result = game.expire("Burnt out");
+        const result = game.expire("rating.burntOut");
         if (result) showReveal(result);
         return;
       }
@@ -188,7 +337,7 @@
     layers.guess = dot(ev.latlng, "guess");
 
     ui.confirmBtn.disabled = false;
-    ui.hint.textContent = "Drop again to move it, or lock in your guess.";
+    ui.hint.textContent = t("hint.placed");
   }
 
   // What a deathmatch round did to the bar. Burn's restore can outweigh the
@@ -196,20 +345,20 @@
   function deathmatchDelta(result, suffix = "") {
     if (result.burntOut) return "—";
     const sign = result.damage > 0 ? "−" : "+";
-    return `${sign}${Math.abs(result.damage).toLocaleString("en")}${suffix}`;
+    return `${sign}${fmtNum(Math.abs(result.damage))}${suffix}`;
   }
 
   // The HUD counter is points banked in a normal game, life left in deathmatch.
   function paintTally() {
     if (!game.deathmatch) {
-      ui.scoreLabel.textContent = `${game.totalScore.toLocaleString("en")} pts`;
+      ui.scoreLabel.textContent = t("hud.points", { n: fmtNum(game.totalScore) });
       ui.scoreLabel.classList.remove("is-critical");
       ui.lifebar.hidden = true;
       return;
     }
     const left = game.hp / game.startHp;
     // Burn drains fractionally between ticks; nobody wants to read 9 342.4 HP.
-    ui.scoreLabel.textContent = `${Math.round(game.hp).toLocaleString("en")} HP`;
+    ui.scoreLabel.textContent = `${fmtNum(Math.round(game.hp))} ${t("unit.hp")}`;
     ui.scoreLabel.classList.toggle("is-critical", left <= 0.25);
     ui.lifebar.hidden = false;
     // Ease the step in a standard game; track the drain in burn, where the bar
@@ -225,16 +374,16 @@
     const station = game.station;
 
     ui.roundLabel.textContent = game.deathmatch
-      ? `Station ${game.roundNumber}`
-      : `Round ${game.roundNumber} / ${game.rounds}`;
+      ? t("hud.station", { n: game.roundNumber })
+      : t("hud.round", { n: game.roundNumber, total: game.rounds });
     paintTally();
     ui.stationName.textContent = station.name;
     renderBadges(ui.stationLines, station);
 
-    ui.hint.textContent = "Click the map to drop your pin.";
+    ui.hint.textContent = t("hint.place");
     ui.hint.hidden = false;
     ui.result.hidden = true;
-    ui.confirmBtn.textContent = "Guess";
+    ui.confirmBtn.textContent = t("confirm.guess");
     ui.confirmBtn.disabled = true;
     ui.map.classList.add("is-guessing");
 
@@ -248,6 +397,10 @@
 
   function showReveal(result) {
     stopClock();
+
+    // Under the pins and the miss line: it is context for the answer, not the
+    // answer. Drawn first so the dashed link stays readable across it.
+    layers.lines = drawStationLines(result.station);
 
     const truth = L.latLng(result.station.lat, result.station.lon);
     layers.truth = dot(truth, "truth");
@@ -282,14 +435,14 @@
 
     ui.hint.hidden = true;
     ui.result.hidden = false;
-    ui.resultRating.textContent = result.rating;
+    ui.resultRating.textContent = t(result.ratingKey);
     ui.resultDistance.textContent =
-      result.km === null ? "no guess" : window.formatDistance(result.km);
+      result.km === null ? t("result.noGuess") : window.formatDistance(result.km);
     // Deathmatch reports what the round cost you, not what it earned - and in
     // burn a sharp pin can cost less than the 1000 restore, i.e. heal you.
     ui.resultPoints.textContent = game.deathmatch
-      ? deathmatchDelta(result, " HP")
-      : `+${result.score.toLocaleString("en")}`;
+      ? deathmatchDelta(result, ` ${t("unit.hp")}`)
+      : `+${fmtNum(result.score)}`;
     ui.resultPoints.classList.toggle(
       "is-damage",
       game.deathmatch && !result.burntOut && result.damage > 0
@@ -301,12 +454,12 @@
     paintTally();
     // Running the whole pool dry is also game over, but it isn't dying.
     ui.confirmBtn.textContent = !game.isOver
-      ? "Next station"
+      ? t("confirm.next")
       : game.deathmatch && game.hp <= 0
       ? game.isBurning
-        ? "Burnt out"
-        : "You died"
-      : "See results";
+        ? t("confirm.burntOut")
+        : t("confirm.died")
+      : t("confirm.results");
     ui.confirmBtn.disabled = false;
     ui.map.classList.remove("is-guessing");
   }
@@ -322,6 +475,87 @@
       game.next();
       startRound();
     }
+  }
+
+  // ---------- basemap demo ----------
+
+  // A sandbox for judging a basemap before it ever reaches a round: pan and zoom
+  // freely, past the game's ceiling, and check that no station name shows up.
+  function buildDemo() {
+    ui.demoLayers.textContent = "";
+    Object.entries(BASEMAPS).forEach(([key, basemap]) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pill" + (key === basemapKey ? " is-selected" : "");
+      btn.dataset.basemap = key;
+      btn.textContent = basemap.label;
+      ui.demoLayers.appendChild(btn);
+    });
+    ui.demoNote.textContent = BASEMAPS[basemapKey].blurb;
+  }
+
+  function openDemo() {
+    if (!SHOW_BASEMAP_DEMO_OPTIONS) return;
+    ui.startScreen.hidden = true;
+    ui.demo.hidden = false;
+    // Let the preview go deeper than a round ever does - the point is to hunt
+    // for labels at the zoom where a style would start printing them.
+    setBasemap(basemapKey, { maxZoom: 20 });
+    buildDemo();
+    map.setView(window.POOLS.metro.view.center, 13, { animate: false });
+    paintDemoZoom();
+  }
+
+  function closeDemo() {
+    ui.demo.hidden = true;
+    clearLayers();
+    setBasemap(GAME_BASEMAP); // the game is always played on voyager
+    ui.startScreen.hidden = false;
+    buildStartScreen();
+  }
+
+  function paintDemoZoom() {
+    if (ui.demo.hidden) return;
+    const zoom = map.getZoom();
+    ui.demoZoom.textContent = `z${zoom}`;
+    // Above the game ceiling you are looking at tiles no round will ever serve.
+    ui.demoZoom.classList.toggle("is-past-game", zoom > GAME_MAX_ZOOM);
+  }
+
+  /**
+   * Drop a reveal onto the preview - truth pin, name label, a guess 600 m off
+   * and the dashed link. The markers have to stay legible on every basemap too,
+   * and green-on-satellite is exactly the case you cannot eyeball in the
+   * abstract.
+   */
+  function dropSample() {
+    clearLayers();
+    const centre = map.getCenter();
+    const from = { lat: centre.lat, lon: centre.lng };
+    const station = window.STATIONS.reduce((best, s) =>
+      window.haversineKm(from, s) < window.haversineKm(from, best) ? s : best
+    );
+
+    const truth = L.latLng(station.lat, station.lon);
+    const guess = L.latLng(station.lat + 0.0054, station.lon);
+    layers.guess = dot(guess, "guess");
+    layers.truth = dot(truth, "truth");
+    layers.link = L.polyline([guess, truth], {
+      color: "#1f2430",
+      weight: 2.5,
+      opacity: 0.8,
+      dashArray: "5 7",
+    }).addTo(map);
+    layers.label = L.marker(truth, {
+      icon: L.divIcon({
+        className: "",
+        html: `<div class="truth-label">${escapeHtml(station.name)}</div>`,
+        iconSize: null,
+        iconAnchor: [-12, 8],
+      }),
+      interactive: false,
+      keyboard: false,
+    }).addTo(map);
   }
 
   // ---------- screens ----------
@@ -349,9 +583,11 @@
       btn.type = "button";
       btn.className = "pool" + (key === settings.pool ? " is-selected" : "");
       btn.dataset.pool = key;
-      btn.innerHTML =
-        `<strong>${pool.label}</strong>` +
-        `<span>${count} stations · ${escapeHtml(pool.blurb)}</span>`;
+      const label = document.createElement("strong");
+      label.textContent = t(`pool.${key}.label`);
+      const blurb = document.createElement("span");
+      blurb.textContent = `${t("pool.count", { count })} · ${t(`pool.${key}.blurb`)}`;
+      btn.append(label, blurb);
       ui.poolOptions.appendChild(btn);
     });
     renderDeathmatch();
@@ -362,7 +598,7 @@
   function renderDeathmatch() {
     ui.variantOptions.hidden = !settings.deathmatch;
     ui.roundsNote.hidden = !settings.deathmatch;
-    ui.roundsNote.textContent = VARIANT_NOTES[settings.variant];
+    ui.roundsNote.textContent = variantNote(settings.variant);
   }
 
   function selectIn(container, selector, chosen) {
@@ -380,19 +616,20 @@
     }
     ui.bestLine.hidden = false;
     if (settings.deathmatch) {
-      ui.bestLine.textContent = `Best on this setup: survived ${entry.survived} station${
-        entry.survived === 1 ? "" : "s"
-      }`;
+      ui.bestLine.textContent = t("best.dm", { count: entry.survived });
       return;
     }
-    const pct = Math.round((entry.score / entry.max) * 100);
-    ui.bestLine.textContent = `Best on this setup: ${entry.score.toLocaleString(
-      "en"
-    )} / ${entry.max.toLocaleString("en")} (${pct}%)`;
+    ui.bestLine.textContent = t("best.score", {
+      score: fmtNum(entry.score),
+      max: fmtNum(entry.max),
+      pct: Math.round((entry.score / entry.max) * 100),
+    });
   }
 
   function startGame() {
     game = new window.Game(window.STATIONS, settings);
+    if (settings.easy) showNetwork(game.poolKey);
+    else hideNetwork();
     ui.startScreen.hidden = true;
     ui.endScreen.hidden = true;
     ui.hud.hidden = false;
@@ -403,6 +640,7 @@
   function showEndScreen() {
     stopClock();
     clearLayers();
+    hideNetwork();
     ui.hud.hidden = true;
     ui.actionbar.hidden = true;
     ui.map.classList.remove("is-guessing");
@@ -415,16 +653,16 @@
       // Surviving the entire pool is a different sentence from bleeding out.
       ui.endTitle.textContent = !game.hp
         ? game.isBurning
-          ? "You burnt out"
-          : "You died"
-        : "You cleared the network";
+          ? t("end.title.burnt")
+          : t("end.title.died")
+        : t("end.title.cleared");
       ui.finalScore.textContent = String(game.survived);
-      ui.finalMax.textContent = game.survived === 1 ? "station" : "stations";
+      ui.finalMax.textContent = t("end.stations", { count: game.survived });
       ui.finalVerdict.textContent = deathmatchVerdictFor(game.survived, game.variant);
     } else {
-      ui.endTitle.textContent = "Final score";
-      ui.finalScore.textContent = total.toLocaleString("en");
-      ui.finalMax.textContent = `/ ${max.toLocaleString("en")}`;
+      ui.endTitle.textContent = t("end.title.final");
+      ui.finalScore.textContent = fmtNum(total);
+      ui.finalMax.textContent = t("end.outOf", { max: fmtNum(max) });
       ui.finalVerdict.textContent = verdictFor(pct);
     }
 
@@ -433,14 +671,12 @@
       const li = document.createElement("li");
       li.innerHTML =
         `<span class="bd-name">${escapeHtml(r.station.name)}</span>` +
-        `<span class="bd-km">${
-          r.km === null ? "out of time" : window.formatDistance(r.km)
-        }</span>` +
+        `<span class="bd-km">${escapeHtml(
+          r.km === null ? t("bd.outOfTime") : window.formatDistance(r.km)
+        )}</span>` +
         `<span class="bd-pts${
           !game.deathmatch || r.burntOut ? "" : r.damage > 0 ? " is-damage" : " is-heal"
-        }">${
-          game.deathmatch ? deathmatchDelta(r) : r.score.toLocaleString("en")
-        }</span>`;
+        }">${game.deathmatch ? deathmatchDelta(r) : fmtNum(r.score)}</span>`;
       ui.breakdown.appendChild(li);
     });
 
@@ -450,16 +686,16 @@
     const timedOut = game.results.length - answered.length;
     const summary = document.createElement("li");
     summary.innerHTML =
-      `<span class="bd-name"><em>Average miss${
-        timedOut ? ` (${timedOut} timed out)` : ""
-      }</em></span>` +
-      `<span class="bd-km">${
+      `<span class="bd-name"><em>${escapeHtml(
+        timedOut ? t("bd.averageTimedOut", { count: timedOut }) : t("bd.average")
+      )}</em></span>` +
+      `<span class="bd-km">${escapeHtml(
         answered.length
           ? window.formatDistance(
               answered.reduce((s, r) => s + r.km, 0) / answered.length
             )
           : "—"
-      }</span>` +
+      )}</span>` +
       `<span class="bd-pts">${pct}%</span>`;
     ui.breakdown.appendChild(summary);
 
@@ -467,48 +703,36 @@
     ui.endScreen.hidden = false;
   }
 
+  // Thresholds only: the sentence behind each one is looked up by key, so the
+  // tables say what a score is worth and i18n.js says it out loud.
+  const VERDICT_TIERS = [90, 75, 55, 35, 15, 0];
+
   function verdictFor(pct) {
-    if (pct >= 90) return "You are the map. Do you drive a 96 bus?";
-    if (pct >= 75) return "Genuinely strong. You know this network.";
-    if (pct >= 55) return "Good instincts, shaky on the outskirts.";
-    if (pct >= 35) return "You know the centre. The suburbs know you don't.";
-    if (pct >= 15) return "Right city, at least.";
-    return "Consider buying a paper map.";
+    return t(`verdict.${VERDICT_TIERS.find((floor) => pct >= floor)}`);
   }
 
   // Standard: 20 000 HP against a 5000-point round, so averaging a 1 km miss
   // buys about 12 stations and 400 m buys about 26. Burn runs shorter - half the
   // bar, and the clock takes its cut whether you pin well or not.
-  const DEATHMATCH_VERDICTS = {
-    standard: [
-      [50, "Fifty stations deep. You are the map."],
-      [30, "A serious run. The suburbs didn't scare you."],
-      [18, "Strong. You died somewhere past the périph."],
-      [10, "Respectable. Two bad pins cost you the run."],
-      [5, "Bled out early. The outskirts got you."],
-      [0, "Barely left Châtelet."],
-    ],
-    burn: [
-      [30, "Thirty under the drain. Frightening."],
-      [18, "Fast and accurate. Very few last this long."],
-      [12, "Strong run — you were still gaining ground on the clock."],
-      [7, "Solid. The drain caught you in the suburbs."],
-      [4, "The clock beat you before the map did."],
-      [0, "Burnt out at the gates."],
-    ],
+  const DEATHMATCH_TIERS = {
+    standard: [50, 30, 18, 10, 5, 0],
+    burn: [30, 18, 12, 7, 4, 0],
   };
 
   function deathmatchVerdictFor(survived, variant) {
-    const table = DEATHMATCH_VERDICTS[variant] ?? DEATHMATCH_VERDICTS.standard;
-    return table.find(([floor]) => survived >= floor)[1];
+    const key = DEATHMATCH_TIERS[variant] ? variant : "standard";
+    const tier = DEATHMATCH_TIERS[key].find((floor) => survived >= floor);
+    return t(`verdict.dm.${key}.${tier}`);
   }
 
   // ---------- best score ----------
 
   // The clock changes the game enough that scores aren't comparable across it,
   // so a 10s run gets its own record rather than competing with an untimed one.
+  // Easy draws the network on the board, so those runs get their own record too.
   const bestKeyFor = (s) =>
-    `${s.pool}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:${s.timeLimit ?? "free"}`;
+    `${s.pool}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:${s.timeLimit ?? "free"}` +
+    (s.easy ? ":easy" : "");
 
   function readBest() {
     try {
@@ -548,6 +772,38 @@
     }
   }
 
+  // ---------- language ----------
+
+  /**
+   * Everything the markup spells out itself. The English text stays in
+   * index.html as the no-JS fallback; this pass overwrites it with the current
+   * language. Dynamic text is not handled here - it is rebuilt from `t()` every
+   * time its screen renders.
+   */
+  function applyStaticStrings() {
+    document.documentElement.lang = window.getLang();
+    document.querySelectorAll("[data-i18n]").forEach((node) => {
+      node.textContent = t(node.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-title]").forEach((node) => {
+      node.title = t(node.dataset.i18nTitle);
+    });
+  }
+
+  function renderLang() {
+    ui.langOptions.querySelectorAll(".lang").forEach((btn) => {
+      btn.classList.toggle("is-selected", btn.dataset.lang === window.getLang());
+    });
+  }
+
+  // The switcher only exists on the start screen, so a language change never has
+  // to catch a game in flight: the start card is the whole re-render.
+  function applyLang() {
+    applyStaticStrings();
+    renderLang();
+    buildStartScreen();
+  }
+
   function escapeHtml(s) {
     return String(s).replace(
       /[&<>"']/g,
@@ -556,6 +812,12 @@
   }
 
   // ---------- events ----------
+
+  ui.langOptions.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".lang");
+    if (!btn || !window.setLang(btn.dataset.lang)) return;
+    applyLang();
+  });
 
   ui.poolOptions.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".pool");
@@ -585,12 +847,36 @@
     renderBest();
   });
 
+  ui.difficultyOptions.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".pill");
+    if (!btn) return;
+    settings.easy = !!btn.dataset.easy;
+    selectIn(ui.difficultyOptions, ".pill", btn);
+    ui.difficultyNote.hidden = !settings.easy;
+    renderBest();
+  });
+
   ui.timerOptions.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".pill");
     if (!btn) return;
     settings.timeLimit = btn.dataset.time ? Number(btn.dataset.time) : null;
     selectIn(ui.timerOptions, ".pill", btn);
     renderBest();
+  });
+
+  // The preview is a development tool: the flag keeps its entry point out of a
+  // released start screen without deleting the sandbox.
+  ui.demoBtn.hidden = !SHOW_BASEMAP_DEMO_OPTIONS;
+  ui.demoBtn.addEventListener("click", openDemo);
+  ui.demoClose.addEventListener("click", closeDemo);
+  ui.demoPin.addEventListener("click", dropSample);
+  ui.demoLayers.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".pill");
+    if (!btn) return;
+    setBasemap(btn.dataset.basemap, { maxZoom: 20 });
+    selectIn(ui.demoLayers, ".pill", btn);
+    ui.demoNote.textContent = BASEMAPS[basemapKey].blurb;
+    paintDemoZoom();
   });
 
   ui.startBtn.addEventListener("click", startGame);
@@ -604,6 +890,7 @@
     stopClock();
     game = null;
     clearLayers();
+    hideNetwork();
     ui.hud.hidden = true;
     ui.actionbar.hidden = true;
     ui.map.classList.remove("is-guessing");
@@ -613,6 +900,12 @@
 
   // Enter drives the whole loop so a round is click-map-then-Enter.
   document.addEventListener("keydown", (ev) => {
+    if (!ui.demo.hidden) {
+      // The preview owns the keyboard while it is up: Enter must not start a
+      // game behind it, and Escape is the way out.
+      if (ev.key === "Escape") closeDemo();
+      return;
+    }
     if (ev.key !== "Enter") return;
     if (!ui.startScreen.hidden) {
       startGame();
@@ -625,13 +918,22 @@
 
   // ---------- boot ----------
 
-  if (!window.STATIONS || !window.STATIONS.length) {
+  const missing = [
+    !window.STATIONS || !window.STATIONS.length ? "build-stations.py" : null,
+    !window.LINES || !window.LINES.length ? "build-lines.py" : null,
+  ].filter(Boolean);
+
+  // Untranslated on purpose: this screen is for whoever is running the repo, not
+  // for a player - a player never sees it with the data files committed.
+  if (missing.length) {
     document.body.innerHTML =
-      '<div class="overlay"><div class="card"><h1>No station data</h1>' +
-      "<p class=tagline>Run <code>python3 build-stations.py</code> to fetch it.</p></div></div>";
+      '<div class="overlay"><div class="card"><h1>No map data</h1>' +
+      "<p class=tagline>Run <code>python3 " +
+      missing.join("</code> and <code>python3 ") +
+      "</code> to fetch it.</p></div></div>";
     return;
   }
 
   initMap();
-  buildStartScreen();
+  applyLang();
 })();
