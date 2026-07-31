@@ -1,24 +1,20 @@
 // Game state machine. Knows nothing about the DOM or Leaflet, so the rules can
 // be reasoned about (and tested) on their own.
 
+// Labels and blurbs live in i18n.js under `pool.<key>.label` / `.blurb`, so
+// this file stays language-free.
 window.POOLS = {
   metro: {
-    label: "Métro",
-    blurb: "Paris and the inner suburbs",
     filter: (s) => s.metro.length > 0,
     view: { center: [48.8566, 2.3522], zoom: 12 },
   },
   rer: {
     // Metro interchanges are excluded so this stays a genuinely different game:
     // the far region, not Châtelet again.
-    label: "RER only",
-    blurb: "the whole région, out to Cergy and Melun",
     filter: (s) => s.rer.length > 0 && s.metro.length === 0,
     view: { center: [48.8566, 2.3522], zoom: 10 },
   },
   all: {
-    label: "Everything",
-    blurb: "métro and RER combined",
     filter: () => true,
     view: { center: [48.8566, 2.3522], zoom: 11 },
   },
@@ -30,8 +26,8 @@ window.POOLS = {
 // thinking, and pays some of it back for every station you actually answer.
 // The goal either way is stations survived, not points banked.
 window.DEATHMATCH_VARIANTS = {
-  standard: { label: "Standard", hp: 20000, drainPerSecond: 0, restore: 0 },
-  burn: { label: "Burn", hp: 10000, drainPerSecond: 100, restore: 1000 },
+  standard: { hp: 20000, drainPerSecond: 0, restore: 0 },
+  burn: { hp: 10000, drainPerSecond: 100, restore: 1000 },
 };
 
 window.Game = class Game {
@@ -120,7 +116,7 @@ window.Game = class Game {
       guess: this.guess,
       km,
       score: window.scoreFor(km),
-      rating: window.ratingFor(km),
+      ratingKey: window.ratingFor(km),
     });
   }
 
@@ -162,7 +158,7 @@ window.Game = class Game {
    * guessing. With nothing placed there is no location to score, so the round is
    * a zero.
    */
-  expire(rating = "Out of time") {
+  expire(ratingKey = "rating.outOfTime") {
     if (this.isRevealed) return null;
     if (this.guess) return this.submit();
 
@@ -171,7 +167,7 @@ window.Game = class Game {
       guess: null,
       km: null,
       score: 0,
-      rating,
+      ratingKey,
       timedOut: true,
     });
   }

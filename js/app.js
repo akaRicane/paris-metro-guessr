@@ -58,10 +58,14 @@
   const SHOW_BASEMAP_DEMO_OPTIONS = false;
   const GAME_BASEMAP = "voyager";
 
+  const t = window.t;
+  const fmtNum = window.fmtNum;
+
   const el = (id) => document.getElementById(id);
   const ui = {
     map: el("map"),
     startScreen: el("start-screen"),
+    langOptions: el("lang-options"),
     poolOptions: el("pool-options"),
     roundOptions: el("round-options"),
     variantOptions: el("variant-options"),
@@ -119,14 +123,18 @@
   };
   let clock = { handle: null, deadline: 0, last: 0 };
 
-  const VARIANT_NOTES = {
-    standard:
-      "20 000 life points. Every round costs you the points you missed — a " +
-      "perfect pin is free, a wild one is 5 000. Last as long as you can.",
-    burn:
-      "10 000 life points, draining 100 every second. The miss still costs you " +
-      "the same, but answering a station pays 1 000 back. Pin well, and quickly.",
-  };
+  // The figures come from the rules rather than from the copy, so the numbers in
+  // the blurb can't drift from the ones the game actually charges - and they
+  // pick up the locale's thousands separator on the way through.
+  function variantNote(key) {
+    const rules = window.DEATHMATCH_VARIANTS[key];
+    return t(`variant.note.${key}`, {
+      hp: fmtNum(rules.hp),
+      max: fmtNum(window.MAX_ROUND_SCORE),
+      drain: fmtNum(rules.drainPerSecond),
+      restore: fmtNum(rules.restore),
+    });
+  }
 
   // ---------- map ----------
 
@@ -300,7 +308,7 @@
       paintTally();
       if (burntOut) {
         stopClock();
-        const result = game.expire("Burnt out");
+        const result = game.expire("rating.burntOut");
         if (result) showReveal(result);
         return;
       }
@@ -329,7 +337,7 @@
     layers.guess = dot(ev.latlng, "guess");
 
     ui.confirmBtn.disabled = false;
-    ui.hint.textContent = "Drop again to move it, or lock in your guess.";
+    ui.hint.textContent = t("hint.placed");
   }
 
   // What a deathmatch round did to the bar. Burn's restore can outweigh the
@@ -337,20 +345,20 @@
   function deathmatchDelta(result, suffix = "") {
     if (result.burntOut) return "—";
     const sign = result.damage > 0 ? "−" : "+";
-    return `${sign}${Math.abs(result.damage).toLocaleString("en")}${suffix}`;
+    return `${sign}${fmtNum(Math.abs(result.damage))}${suffix}`;
   }
 
   // The HUD counter is points banked in a normal game, life left in deathmatch.
   function paintTally() {
     if (!game.deathmatch) {
-      ui.scoreLabel.textContent = `${game.totalScore.toLocaleString("en")} pts`;
+      ui.scoreLabel.textContent = t("hud.points", { n: fmtNum(game.totalScore) });
       ui.scoreLabel.classList.remove("is-critical");
       ui.lifebar.hidden = true;
       return;
     }
     const left = game.hp / game.startHp;
     // Burn drains fractionally between ticks; nobody wants to read 9 342.4 HP.
-    ui.scoreLabel.textContent = `${Math.round(game.hp).toLocaleString("en")} HP`;
+    ui.scoreLabel.textContent = `${fmtNum(Math.round(game.hp))} ${t("unit.hp")}`;
     ui.scoreLabel.classList.toggle("is-critical", left <= 0.25);
     ui.lifebar.hidden = false;
     // Ease the step in a standard game; track the drain in burn, where the bar
@@ -366,16 +374,16 @@
     const station = game.station;
 
     ui.roundLabel.textContent = game.deathmatch
-      ? `Station ${game.roundNumber}`
-      : `Round ${game.roundNumber} / ${game.rounds}`;
+      ? t("hud.station", { n: game.roundNumber })
+      : t("hud.round", { n: game.roundNumber, total: game.rounds });
     paintTally();
     ui.stationName.textContent = station.name;
     renderBadges(ui.stationLines, station);
 
-    ui.hint.textContent = "Click the map to drop your pin.";
+    ui.hint.textContent = t("hint.place");
     ui.hint.hidden = false;
     ui.result.hidden = true;
-    ui.confirmBtn.textContent = "Guess";
+    ui.confirmBtn.textContent = t("confirm.guess");
     ui.confirmBtn.disabled = true;
     ui.map.classList.add("is-guessing");
 
@@ -427,14 +435,14 @@
 
     ui.hint.hidden = true;
     ui.result.hidden = false;
-    ui.resultRating.textContent = result.rating;
+    ui.resultRating.textContent = t(result.ratingKey);
     ui.resultDistance.textContent =
-      result.km === null ? "no guess" : window.formatDistance(result.km);
+      result.km === null ? t("result.noGuess") : window.formatDistance(result.km);
     // Deathmatch reports what the round cost you, not what it earned - and in
     // burn a sharp pin can cost less than the 1000 restore, i.e. heal you.
     ui.resultPoints.textContent = game.deathmatch
-      ? deathmatchDelta(result, " HP")
-      : `+${result.score.toLocaleString("en")}`;
+      ? deathmatchDelta(result, ` ${t("unit.hp")}`)
+      : `+${fmtNum(result.score)}`;
     ui.resultPoints.classList.toggle(
       "is-damage",
       game.deathmatch && !result.burntOut && result.damage > 0
@@ -446,12 +454,12 @@
     paintTally();
     // Running the whole pool dry is also game over, but it isn't dying.
     ui.confirmBtn.textContent = !game.isOver
-      ? "Next station"
+      ? t("confirm.next")
       : game.deathmatch && game.hp <= 0
       ? game.isBurning
-        ? "Burnt out"
-        : "You died"
-      : "See results";
+        ? t("confirm.burntOut")
+        : t("confirm.died")
+      : t("confirm.results");
     ui.confirmBtn.disabled = false;
     ui.map.classList.remove("is-guessing");
   }
@@ -575,9 +583,11 @@
       btn.type = "button";
       btn.className = "pool" + (key === settings.pool ? " is-selected" : "");
       btn.dataset.pool = key;
-      btn.innerHTML =
-        `<strong>${pool.label}</strong>` +
-        `<span>${count} stations · ${escapeHtml(pool.blurb)}</span>`;
+      const label = document.createElement("strong");
+      label.textContent = t(`pool.${key}.label`);
+      const blurb = document.createElement("span");
+      blurb.textContent = `${t("pool.count", { count })} · ${t(`pool.${key}.blurb`)}`;
+      btn.append(label, blurb);
       ui.poolOptions.appendChild(btn);
     });
     renderDeathmatch();
@@ -588,7 +598,7 @@
   function renderDeathmatch() {
     ui.variantOptions.hidden = !settings.deathmatch;
     ui.roundsNote.hidden = !settings.deathmatch;
-    ui.roundsNote.textContent = VARIANT_NOTES[settings.variant];
+    ui.roundsNote.textContent = variantNote(settings.variant);
   }
 
   function selectIn(container, selector, chosen) {
@@ -606,15 +616,14 @@
     }
     ui.bestLine.hidden = false;
     if (settings.deathmatch) {
-      ui.bestLine.textContent = `Best on this setup: survived ${entry.survived} station${
-        entry.survived === 1 ? "" : "s"
-      }`;
+      ui.bestLine.textContent = t("best.dm", { count: entry.survived });
       return;
     }
-    const pct = Math.round((entry.score / entry.max) * 100);
-    ui.bestLine.textContent = `Best on this setup: ${entry.score.toLocaleString(
-      "en"
-    )} / ${entry.max.toLocaleString("en")} (${pct}%)`;
+    ui.bestLine.textContent = t("best.score", {
+      score: fmtNum(entry.score),
+      max: fmtNum(entry.max),
+      pct: Math.round((entry.score / entry.max) * 100),
+    });
   }
 
   function startGame() {
@@ -644,16 +653,16 @@
       // Surviving the entire pool is a different sentence from bleeding out.
       ui.endTitle.textContent = !game.hp
         ? game.isBurning
-          ? "You burnt out"
-          : "You died"
-        : "You cleared the network";
+          ? t("end.title.burnt")
+          : t("end.title.died")
+        : t("end.title.cleared");
       ui.finalScore.textContent = String(game.survived);
-      ui.finalMax.textContent = game.survived === 1 ? "station" : "stations";
+      ui.finalMax.textContent = t("end.stations", { count: game.survived });
       ui.finalVerdict.textContent = deathmatchVerdictFor(game.survived, game.variant);
     } else {
-      ui.endTitle.textContent = "Final score";
-      ui.finalScore.textContent = total.toLocaleString("en");
-      ui.finalMax.textContent = `/ ${max.toLocaleString("en")}`;
+      ui.endTitle.textContent = t("end.title.final");
+      ui.finalScore.textContent = fmtNum(total);
+      ui.finalMax.textContent = t("end.outOf", { max: fmtNum(max) });
       ui.finalVerdict.textContent = verdictFor(pct);
     }
 
@@ -662,14 +671,12 @@
       const li = document.createElement("li");
       li.innerHTML =
         `<span class="bd-name">${escapeHtml(r.station.name)}</span>` +
-        `<span class="bd-km">${
-          r.km === null ? "out of time" : window.formatDistance(r.km)
-        }</span>` +
+        `<span class="bd-km">${escapeHtml(
+          r.km === null ? t("bd.outOfTime") : window.formatDistance(r.km)
+        )}</span>` +
         `<span class="bd-pts${
           !game.deathmatch || r.burntOut ? "" : r.damage > 0 ? " is-damage" : " is-heal"
-        }">${
-          game.deathmatch ? deathmatchDelta(r) : r.score.toLocaleString("en")
-        }</span>`;
+        }">${game.deathmatch ? deathmatchDelta(r) : fmtNum(r.score)}</span>`;
       ui.breakdown.appendChild(li);
     });
 
@@ -679,16 +686,16 @@
     const timedOut = game.results.length - answered.length;
     const summary = document.createElement("li");
     summary.innerHTML =
-      `<span class="bd-name"><em>Average miss${
-        timedOut ? ` (${timedOut} timed out)` : ""
-      }</em></span>` +
-      `<span class="bd-km">${
+      `<span class="bd-name"><em>${escapeHtml(
+        timedOut ? t("bd.averageTimedOut", { count: timedOut }) : t("bd.average")
+      )}</em></span>` +
+      `<span class="bd-km">${escapeHtml(
         answered.length
           ? window.formatDistance(
               answered.reduce((s, r) => s + r.km, 0) / answered.length
             )
           : "—"
-      }</span>` +
+      )}</span>` +
       `<span class="bd-pts">${pct}%</span>`;
     ui.breakdown.appendChild(summary);
 
@@ -696,40 +703,26 @@
     ui.endScreen.hidden = false;
   }
 
+  // Thresholds only: the sentence behind each one is looked up by key, so the
+  // tables say what a score is worth and i18n.js says it out loud.
+  const VERDICT_TIERS = [90, 75, 55, 35, 15, 0];
+
   function verdictFor(pct) {
-    if (pct >= 90) return "You are the map. Do you drive a 96 bus?";
-    if (pct >= 75) return "Genuinely strong. You know this network.";
-    if (pct >= 55) return "Good instincts, shaky on the outskirts.";
-    if (pct >= 35) return "You know the centre. The suburbs know you don't.";
-    if (pct >= 15) return "Right city, at least.";
-    return "Consider buying a paper map.";
+    return t(`verdict.${VERDICT_TIERS.find((floor) => pct >= floor)}`);
   }
 
   // Standard: 20 000 HP against a 5000-point round, so averaging a 1 km miss
   // buys about 12 stations and 400 m buys about 26. Burn runs shorter - half the
   // bar, and the clock takes its cut whether you pin well or not.
-  const DEATHMATCH_VERDICTS = {
-    standard: [
-      [50, "Fifty stations deep. You are the map."],
-      [30, "A serious run. The suburbs didn't scare you."],
-      [18, "Strong. You died somewhere past the périph."],
-      [10, "Respectable. Two bad pins cost you the run."],
-      [5, "Bled out early. The outskirts got you."],
-      [0, "Barely left Châtelet."],
-    ],
-    burn: [
-      [30, "Thirty under the drain. Frightening."],
-      [18, "Fast and accurate. Very few last this long."],
-      [12, "Strong run — you were still gaining ground on the clock."],
-      [7, "Solid. The drain caught you in the suburbs."],
-      [4, "The clock beat you before the map did."],
-      [0, "Burnt out at the gates."],
-    ],
+  const DEATHMATCH_TIERS = {
+    standard: [50, 30, 18, 10, 5, 0],
+    burn: [30, 18, 12, 7, 4, 0],
   };
 
   function deathmatchVerdictFor(survived, variant) {
-    const table = DEATHMATCH_VERDICTS[variant] ?? DEATHMATCH_VERDICTS.standard;
-    return table.find(([floor]) => survived >= floor)[1];
+    const key = DEATHMATCH_TIERS[variant] ? variant : "standard";
+    const tier = DEATHMATCH_TIERS[key].find((floor) => survived >= floor);
+    return t(`verdict.dm.${key}.${tier}`);
   }
 
   // ---------- best score ----------
@@ -779,6 +772,38 @@
     }
   }
 
+  // ---------- language ----------
+
+  /**
+   * Everything the markup spells out itself. The English text stays in
+   * index.html as the no-JS fallback; this pass overwrites it with the current
+   * language. Dynamic text is not handled here - it is rebuilt from `t()` every
+   * time its screen renders.
+   */
+  function applyStaticStrings() {
+    document.documentElement.lang = window.getLang();
+    document.querySelectorAll("[data-i18n]").forEach((node) => {
+      node.textContent = t(node.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-title]").forEach((node) => {
+      node.title = t(node.dataset.i18nTitle);
+    });
+  }
+
+  function renderLang() {
+    ui.langOptions.querySelectorAll(".lang").forEach((btn) => {
+      btn.classList.toggle("is-selected", btn.dataset.lang === window.getLang());
+    });
+  }
+
+  // The switcher only exists on the start screen, so a language change never has
+  // to catch a game in flight: the start card is the whole re-render.
+  function applyLang() {
+    applyStaticStrings();
+    renderLang();
+    buildStartScreen();
+  }
+
   function escapeHtml(s) {
     return String(s).replace(
       /[&<>"']/g,
@@ -787,6 +812,12 @@
   }
 
   // ---------- events ----------
+
+  ui.langOptions.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".lang");
+    if (!btn || !window.setLang(btn.dataset.lang)) return;
+    applyLang();
+  });
 
   ui.poolOptions.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".pool");
@@ -892,6 +923,8 @@
     !window.LINES || !window.LINES.length ? "build-lines.py" : null,
   ].filter(Boolean);
 
+  // Untranslated on purpose: this screen is for whoever is running the repo, not
+  // for a player - a player never sees it with the data files committed.
   if (missing.length) {
     document.body.innerHTML =
       '<div class="overlay"><div class="card"><h1>No map data</h1>' +
@@ -902,5 +935,5 @@
   }
 
   initMap();
-  buildStartScreen();
+  applyLang();
 })();

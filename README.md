@@ -75,6 +75,26 @@ rounds are excluded from the end-of-game average miss rather than folded in as a
 flattering 0 km. The countdown ticks against a wall-clock deadline, not a
 decremented variable, so backgrounding the tab doesn't hand back free seconds.
 
+## English and French
+
+The interface is bilingual, switched by the `EN | FR` toggle in the corner of the
+start card. The choice is remembered in `localStorage` and, on a first visit,
+guessed from the browser's language. It is not part of the game setup, so it does
+*not* split your best scores: a record set in English is the same record in
+French.
+
+Station and line names are never translated — they are French proper nouns in
+both languages, and they are the answer to the game.
+
+All copy lives in `js/i18n.js`, keyed (`hud.round`, `rating.bangOn`). The rules
+layer holds keys rather than sentences: `ratingFor()` returns `rating.solid`, not
+`"Solid"`, so `geo.js` and `game.js` stay free of any language. `t()` resolves a
+key, falls back to English, and picks between `.one` and `.other` on a `count` —
+French keeps the singular through zero (`0 station`, `2 stations`). Numbers and
+distances go through the locale, so `20,000` becomes `20 000` and `1.45 km`
+becomes `1,45 km`. Static markup carries `data-i18n="key"` and is overwritten on
+load; the English in `index.html` is the no-JS fallback.
+
 ## The map deliberately has no labels
 
 Standard OSM raster tiles print station names directly onto the board, which
@@ -149,6 +169,7 @@ Station data is ODbL, © Île-de-France Mobilités. Tiles © CARTO,
 | --- | --- |
 | `js/game.js` | Rules and round state. No DOM, no Leaflet — testable alone. |
 | `js/geo.js` | Haversine, scoring curve, formatting. Pure functions. |
+| `js/i18n.js` | English and French copy, plus `t()` and locale number formatting. |
 | `js/lines.js` | Official IDFM line colours + WCAG-luminance badge contrast. |
 | `js/app.js` | Leaflet + DOM wiring. Renders state, forwards input. |
 | `build-stations.py` | Regenerates `data/stations.js` from the open data API. |
