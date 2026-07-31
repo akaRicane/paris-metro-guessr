@@ -18,17 +18,28 @@ python3 -m http.server 8000
 ## How it plays
 
 - Pick a network (Métro / RER-only / everything), a round count (5 / 10 / 20, or
-  **deathmatch**, in standard or burn), and a time limit (no limit / 60s / 30s /
-  10s).
+  **deathmatch**, in standard or burn), a difficulty, and a time limit (no limit
+  / 60s / 30s / 10s).
 - Click the map to drop your pin. Click again to move it.
 - **Guess** locks it in and reveals the true location, the great-circle miss
-  distance, and the points.
+  distance, the points, and the lines that serve the station drawn on the map.
 - `Enter` drives the whole loop, so a round is click-map-then-Enter.
 
 Scoring decays exponentially with the miss: `5000 · e^(−km/2.5)`, tuned to Paris
 scale. Adjacent métro stations sit roughly 500 m apart, so landing inside 500 m
 still pays 4094 of 5000. Best score per setup is kept in `localStorage`, keyed
 on the clock too — a 10s run doesn't compete with an untimed one.
+
+**The network is drawn on the reveal** — the real track geometry of every line
+serving the station, in the official colours, under the pins and the miss line.
+It costs nothing, since the round is already scored, and it's where the game
+stops being a quiz and starts teaching you the map.
+
+**Easy** puts that network on the board *while* you guess: the whole pool, thin
+and half-transparent. You still have to know which station on line 4 you're being
+asked for, but you no longer have to remember where line 4 runs. The backdrop
+follows the pool, so a métro game doesn't sketch the RER out to Melun. Easy runs
+keep their own best-score record — a hint on the board isn't the same game.
 
 **Deathmatch** replaces the round count with a life bar and no end in sight. Each
 round costs you the points you *didn't* score — `5000 − score` — so a pin on the
@@ -72,19 +83,39 @@ label-free through zoom 17 — so the Seine, the parks, the arterials and the ra
 corridors are the only cues. The viewport also resets every round, since a
 leftover zoom from the previous reveal would leak where you are.
 
+**Preview basemaps** on the start screen opens a sandbox for vetting the
+alternatives: pan and zoom freely — past the game's z17 ceiling, which the zoom
+readout flags — and drop a sample reveal to check the pins and the name label
+stay legible. Four styles survived the check:
+
+| Style | Notes |
+| --- | --- |
+| Carto `voyager_nolabels` | What the game plays on. Colour, so the city is readable. |
+| Carto `light_nolabels` | Near-white; the Seine barely registers. |
+| Carto `dark_nolabels` | Positron inverted. Low contrast. |
+| Esri World Imagery | Satellite. No cartography at all. |
+
+`nolabels` in a slug is not proof — Esri's Canvas Light/Dark Gray read like
+obvious candidates and print park and district names straight into the tiles, so
+they're out. Stadia's Stamen styles return 401 without an API key. The preview is
+a preview: rounds are always served voyager, and each provider gets its own
+`L.tileLayer` rather than a `setUrl` swap, so the attribution in the corner
+always credits whoever actually drew the tiles.
+
 ## Data
 
-`data/stations.js` is generated, not hand-written. Regenerate with:
+`data/stations.js` and `data/lines.js` are generated, not hand-written.
+Regenerate with:
 
 ```sh
 python3 build-stations.py
+python3 build-lines.py
 ```
 
-It pulls the `emplacement-des-gares-idf-data-generalisee` dataset from
-[Île-de-France Mobilités open data](https://data.iledefrance-mobilites.fr)
-(no API key needed) and produces 536 stations — 318 serving métro, 218 RER-only.
-
-Two things the source needs untangling for:
+Both pull from [Île-de-France Mobilités open data](https://data.iledefrance-mobilites.fr)
+(no API key needed). `build-stations.py` produces 536 stations — 318 serving
+métro, 218 RER-only — from `emplacement-des-gares-idf-data-generalisee`. Two
+things that source needs untangling for:
 
 - **One row per station-per-line.** Rows are merged on `id_ref_zdc`, the
   interchange a traveller thinks of as a single station, and coordinates are
@@ -95,6 +126,19 @@ Two things the source needs untangling for:
   and Saint-Fargeau are genuinely two unrelated places each — métro Malesherbes
   in Paris and RER D Malesherbes 65 km out in the Essonne — so those get a mode
   suffix instead. Either way no prompt is ambiguous.
+
+`build-lines.py` produces 660 track segments across all 21 lines from
+`traces-du-reseau-ferre-idf`, tagged with the same `res_com` convention so the
+labels drop straight into the existing colour table. The raw traces follow the
+tunnels curve by curve — 17 000 coordinates, 370 kB — which is a lot of file for
+detail nobody can see, so they're simplified with Douglas-Peucker at roughly 11 m.
+That is under what a 2.5 px stroke can show at the game's maximum zoom, and it
+costs 82% of the coordinates: **82 kB** for the whole network.
+
+There is no free transit *basemap* to lean on instead — OpenRailwayMap's tiles
+403, Thunderforest Transport wants an API key — and drawing it ourselves is the
+better answer anyway: no labels to leak, and the lines come out in the same
+official colours as the badges.
 
 Station data is ODbL, © Île-de-France Mobilités. Tiles © CARTO,
 © OpenStreetMap contributors.
@@ -108,3 +152,4 @@ Station data is ODbL, © Île-de-France Mobilités. Tiles © CARTO,
 | `js/lines.js` | Official IDFM line colours + WCAG-luminance badge contrast. |
 | `js/app.js` | Leaflet + DOM wiring. Renders state, forwards input. |
 | `build-stations.py` | Regenerates `data/stations.js` from the open data API. |
+| `build-lines.py` | Regenerates `data/lines.js` — track geometry, simplified. |

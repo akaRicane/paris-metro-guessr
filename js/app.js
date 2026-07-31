@@ -9,6 +9,55 @@
   // Panning off to Normandy has no gameplay value and just gets you lost.
   const REGION_BOUNDS = L.latLngBounds([48.0, 1.6], [49.4, 3.3]);
 
+  // The game stops short of the tile ceiling: past this you are reading kerbs.
+  const GAME_MAX_ZOOM = 17;
+
+  const CARTO_ATTR =
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
+    '&copy; <a href="https://carto.com/attributions">CARTO</a> &middot; ' +
+    "stations: Île-de-France Mobilités (ODbL)";
+  const ESRI_ATTR =
+    "Imagery &copy; Esri, Maxar, Earthstar Geographics &middot; " +
+    "stations: Île-de-France Mobilités (ODbL)";
+
+  // Every basemap here was checked against a z15 tile over Châtelet: a style
+  // that prints one place name hands over the answer, so "nolabels" in the slug
+  // is not enough on its own. Esri's Canvas Light/Dark Gray look like obvious
+  // candidates and are disqualified - they bake park and district names into the
+  // tiles. Stadia's Stamen styles need an API key (401 without one).
+  const BASEMAPS = {
+    voyager: {
+      label: "Voyager",
+      blurb: "Colour. Blue Seine, green parks, yellow arterials — the fairest read.",
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
+      options: { subdomains: "abcd", maxZoom: 20, attribution: CARTO_ATTR },
+    },
+    light: {
+      label: "Positron",
+      blurb: "Near-white. The Seine barely registers, so you navigate on street grain.",
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}{r}.png",
+      options: { subdomains: "abcd", maxZoom: 20, attribution: CARTO_ATTR },
+    },
+    dark: {
+      label: "Dark Matter",
+      blurb: "Same geometry as Positron, inverted. Easy on the eyes, low contrast.",
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}{r}.png",
+      options: { subdomains: "abcd", maxZoom: 20, attribution: CARTO_ATTR },
+    },
+    satellite: {
+      // Esri wants {y} before {x}; Leaflet substitutes by name, so it just works.
+      label: "Satellite",
+      blurb: "Esri imagery. No cartography at all — rooflines, rail yards, parks.",
+      url:
+        "https://server.arcgisonline.com/ArcGIS/rest/services/" +
+        "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      options: { maxZoom: 19, attribution: ESRI_ATTR },
+    },
+  };
+
+  const SHOW_BASEMAP_DEMO_OPTIONS = false;
+  const GAME_BASEMAP = "voyager";
+
   const el = (id) => document.getElementById(id);
   const ui = {
     map: el("map"),
@@ -16,8 +65,17 @@
     poolOptions: el("pool-options"),
     roundOptions: el("round-options"),
     variantOptions: el("variant-options"),
+    difficultyOptions: el("difficulty-options"),
+    difficultyNote: el("difficulty-note"),
     roundsNote: el("rounds-note"),
     startBtn: el("start-btn"),
+    demoBtn: el("demo-btn"),
+    demo: el("demo"),
+    demoLayers: el("demo-layers"),
+    demoNote: el("demo-note"),
+    demoZoom: el("demo-zoom"),
+    demoPin: el("demo-pin"),
+    demoClose: el("demo-close"),
     bestLine: el("best-line"),
     hud: el("hud"),
     roundLabel: el("round-label"),
@@ -46,7 +104,10 @@
   };
 
   let map;
-  let layers = { guess: null, truth: null, link: null, label: null };
+  let basemapLayer = null;
+  let basemapKey = GAME_BASEMAP;
+  let layers = { guess: null, truth: null, link: null, label: null, lines: null };
+  let networkLayer = null; // easy mode's backdrop, outside the per-round layers
   let game = null;
   let settings = {
     pool: "metro",
@@ -54,6 +115,7 @@
     timeLimit: null,
     deathmatch: false,
     variant: "standard",
+    easy: false,
   };
   let clock = { handle: null, deadline: 0, last: 0 };
 
@@ -73,7 +135,7 @@
       center: window.POOLS.metro.view.center,
       zoom: window.POOLS.metro.view.zoom,
       minZoom: 9,
-      maxZoom: 17,
+      maxZoom: GAME_MAX_ZOOM,
       maxBounds: REGION_BOUNDS,
       maxBoundsViscosity: 0.85,
       zoomControl: true,
@@ -81,24 +143,29 @@
     });
 
     // A labelled basemap would print the station names straight onto the board,
-    // so this uses Carto's no-label raster - verified label-free through z17.
-    // Voyager over the darker variants because you need to actually read the
-    // city: blue Seine, green parks, yellow arterials, grey rail corridors are
-    // the only cues you get, and that is the whole game.
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
-      {
-        subdomains: "abcd",
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
-          '&copy; <a href="https://carto.com/attributions">CARTO</a> &middot; ' +
-          "stations: Île-de-France Mobilités (ODbL)",
-      }
-    ).addTo(map);
+    // so the game runs on Carto's no-label voyager raster. Voyager over the
+    // paler variants because you need to actually read the city: blue Seine,
+    // green parks, yellow arterials, grey rail corridors are the only cues you
+    // get, and that is the whole game.
+    setBasemap(GAME_BASEMAP);
 
     map.on("click", onMapClick);
+    map.on("zoomend", paintDemoZoom);
     document.getElementById("map").removeAttribute("aria-hidden");
+  }
+
+  /**
+   * Swap the basemap. A fresh layer rather than tiles.setUrl(): each provider
+   * carries its own attribution and zoom ceiling, and setUrl would leave the
+   * credit in the corner pointing at the wrong company.
+   */
+  function setBasemap(key, { maxZoom = GAME_MAX_ZOOM } = {}) {
+    const basemap = BASEMAPS[key];
+    if (!basemap) return;
+    basemapKey = key;
+    if (basemapLayer) map.removeLayer(basemapLayer);
+    basemapLayer = L.tileLayer(basemap.url, basemap.options).addTo(map);
+    map.setMaxZoom(Math.min(maxZoom, basemap.options.maxZoom));
   }
 
   function dot(latlng, kind) {
@@ -112,6 +179,80 @@
       keyboard: false,
       interactive: false,
     }).addTo(map);
+  }
+
+  // ---------- network geometry ----------
+
+  const colorOf = (segment) => window.LINE_COLORS[segment.kind][segment.line] || "#666";
+
+  /**
+   * The lines a pool plays on. Métro-only games have no business showing the
+   * RER out to Melun, and the RER game shouldn't sketch the métro underneath it.
+   */
+  function segmentsForPool(poolKey) {
+    if (poolKey === "metro") return window.LINES.filter((s) => s.kind === "metro");
+    if (poolKey === "rer") return window.LINES.filter((s) => s.kind === "rer");
+    return window.LINES;
+  }
+
+  function segmentsForStation(station) {
+    return window.LINES.filter(
+      (s) =>
+        (s.kind === "metro" && station.metro.includes(s.line)) ||
+        (s.kind === "rer" && station.rer.includes(s.line))
+    );
+  }
+
+  /**
+   * Easy mode's backdrop: the whole pool, thin and half-transparent so it reads
+   * as a hint rather than as the answer. Built once per game and left on the map
+   * between rounds - 660 polylines is not something to rebuild every round.
+   */
+  function showNetwork(poolKey) {
+    hideNetwork();
+    networkLayer = L.layerGroup(
+      segmentsForPool(poolKey).map((s) =>
+        L.polyline(s.pts, {
+          color: colorOf(s),
+          weight: 2.5,
+          opacity: 0.5,
+          interactive: false,
+        })
+      )
+    ).addTo(map);
+  }
+
+  function hideNetwork() {
+    if (networkLayer) map.removeLayer(networkLayer);
+    networkLayer = null;
+  }
+
+  /**
+   * The reveal's teaching moment: the lines that actually serve this station,
+   * full strength over a white casing so they hold up on satellite and on the
+   * pale basemaps alike.
+   */
+  function drawStationLines(station) {
+    const segments = segmentsForStation(station);
+    if (!segments.length) return null;
+
+    const casing = segments.map((s) =>
+      L.polyline(s.pts, {
+        color: "#ffffff",
+        weight: 7,
+        opacity: 0.55,
+        interactive: false,
+      })
+    );
+    const strokes = segments.map((s) =>
+      L.polyline(s.pts, {
+        color: colorOf(s),
+        weight: 4,
+        opacity: 0.95,
+        interactive: false,
+      })
+    );
+    return L.layerGroup([...casing, ...strokes]).addTo(map);
   }
 
   function clearLayers() {
@@ -249,6 +390,10 @@
   function showReveal(result) {
     stopClock();
 
+    // Under the pins and the miss line: it is context for the answer, not the
+    // answer. Drawn first so the dashed link stays readable across it.
+    layers.lines = drawStationLines(result.station);
+
     const truth = L.latLng(result.station.lat, result.station.lon);
     layers.truth = dot(truth, "truth");
     layers.label = L.marker(truth, {
@@ -324,6 +469,87 @@
     }
   }
 
+  // ---------- basemap demo ----------
+
+  // A sandbox for judging a basemap before it ever reaches a round: pan and zoom
+  // freely, past the game's ceiling, and check that no station name shows up.
+  function buildDemo() {
+    ui.demoLayers.textContent = "";
+    Object.entries(BASEMAPS).forEach(([key, basemap]) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pill" + (key === basemapKey ? " is-selected" : "");
+      btn.dataset.basemap = key;
+      btn.textContent = basemap.label;
+      ui.demoLayers.appendChild(btn);
+    });
+    ui.demoNote.textContent = BASEMAPS[basemapKey].blurb;
+  }
+
+  function openDemo() {
+    if (!SHOW_BASEMAP_DEMO_OPTIONS) return;
+    ui.startScreen.hidden = true;
+    ui.demo.hidden = false;
+    // Let the preview go deeper than a round ever does - the point is to hunt
+    // for labels at the zoom where a style would start printing them.
+    setBasemap(basemapKey, { maxZoom: 20 });
+    buildDemo();
+    map.setView(window.POOLS.metro.view.center, 13, { animate: false });
+    paintDemoZoom();
+  }
+
+  function closeDemo() {
+    ui.demo.hidden = true;
+    clearLayers();
+    setBasemap(GAME_BASEMAP); // the game is always played on voyager
+    ui.startScreen.hidden = false;
+    buildStartScreen();
+  }
+
+  function paintDemoZoom() {
+    if (ui.demo.hidden) return;
+    const zoom = map.getZoom();
+    ui.demoZoom.textContent = `z${zoom}`;
+    // Above the game ceiling you are looking at tiles no round will ever serve.
+    ui.demoZoom.classList.toggle("is-past-game", zoom > GAME_MAX_ZOOM);
+  }
+
+  /**
+   * Drop a reveal onto the preview - truth pin, name label, a guess 600 m off
+   * and the dashed link. The markers have to stay legible on every basemap too,
+   * and green-on-satellite is exactly the case you cannot eyeball in the
+   * abstract.
+   */
+  function dropSample() {
+    clearLayers();
+    const centre = map.getCenter();
+    const from = { lat: centre.lat, lon: centre.lng };
+    const station = window.STATIONS.reduce((best, s) =>
+      window.haversineKm(from, s) < window.haversineKm(from, best) ? s : best
+    );
+
+    const truth = L.latLng(station.lat, station.lon);
+    const guess = L.latLng(station.lat + 0.0054, station.lon);
+    layers.guess = dot(guess, "guess");
+    layers.truth = dot(truth, "truth");
+    layers.link = L.polyline([guess, truth], {
+      color: "#1f2430",
+      weight: 2.5,
+      opacity: 0.8,
+      dashArray: "5 7",
+    }).addTo(map);
+    layers.label = L.marker(truth, {
+      icon: L.divIcon({
+        className: "",
+        html: `<div class="truth-label">${escapeHtml(station.name)}</div>`,
+        iconSize: null,
+        iconAnchor: [-12, 8],
+      }),
+      interactive: false,
+      keyboard: false,
+    }).addTo(map);
+  }
+
   // ---------- screens ----------
 
   function renderBadges(container, station) {
@@ -393,6 +619,8 @@
 
   function startGame() {
     game = new window.Game(window.STATIONS, settings);
+    if (settings.easy) showNetwork(game.poolKey);
+    else hideNetwork();
     ui.startScreen.hidden = true;
     ui.endScreen.hidden = true;
     ui.hud.hidden = false;
@@ -403,6 +631,7 @@
   function showEndScreen() {
     stopClock();
     clearLayers();
+    hideNetwork();
     ui.hud.hidden = true;
     ui.actionbar.hidden = true;
     ui.map.classList.remove("is-guessing");
@@ -507,8 +736,10 @@
 
   // The clock changes the game enough that scores aren't comparable across it,
   // so a 10s run gets its own record rather than competing with an untimed one.
+  // Easy draws the network on the board, so those runs get their own record too.
   const bestKeyFor = (s) =>
-    `${s.pool}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:${s.timeLimit ?? "free"}`;
+    `${s.pool}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:${s.timeLimit ?? "free"}` +
+    (s.easy ? ":easy" : "");
 
   function readBest() {
     try {
@@ -585,12 +816,36 @@
     renderBest();
   });
 
+  ui.difficultyOptions.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".pill");
+    if (!btn) return;
+    settings.easy = !!btn.dataset.easy;
+    selectIn(ui.difficultyOptions, ".pill", btn);
+    ui.difficultyNote.hidden = !settings.easy;
+    renderBest();
+  });
+
   ui.timerOptions.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".pill");
     if (!btn) return;
     settings.timeLimit = btn.dataset.time ? Number(btn.dataset.time) : null;
     selectIn(ui.timerOptions, ".pill", btn);
     renderBest();
+  });
+
+  // The preview is a development tool: the flag keeps its entry point out of a
+  // released start screen without deleting the sandbox.
+  ui.demoBtn.hidden = !SHOW_BASEMAP_DEMO_OPTIONS;
+  ui.demoBtn.addEventListener("click", openDemo);
+  ui.demoClose.addEventListener("click", closeDemo);
+  ui.demoPin.addEventListener("click", dropSample);
+  ui.demoLayers.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".pill");
+    if (!btn) return;
+    setBasemap(btn.dataset.basemap, { maxZoom: 20 });
+    selectIn(ui.demoLayers, ".pill", btn);
+    ui.demoNote.textContent = BASEMAPS[basemapKey].blurb;
+    paintDemoZoom();
   });
 
   ui.startBtn.addEventListener("click", startGame);
@@ -604,6 +859,7 @@
     stopClock();
     game = null;
     clearLayers();
+    hideNetwork();
     ui.hud.hidden = true;
     ui.actionbar.hidden = true;
     ui.map.classList.remove("is-guessing");
@@ -613,6 +869,12 @@
 
   // Enter drives the whole loop so a round is click-map-then-Enter.
   document.addEventListener("keydown", (ev) => {
+    if (!ui.demo.hidden) {
+      // The preview owns the keyboard while it is up: Enter must not start a
+      // game behind it, and Escape is the way out.
+      if (ev.key === "Escape") closeDemo();
+      return;
+    }
     if (ev.key !== "Enter") return;
     if (!ui.startScreen.hidden) {
       startGame();
@@ -625,10 +887,17 @@
 
   // ---------- boot ----------
 
-  if (!window.STATIONS || !window.STATIONS.length) {
+  const missing = [
+    !window.STATIONS || !window.STATIONS.length ? "build-stations.py" : null,
+    !window.LINES || !window.LINES.length ? "build-lines.py" : null,
+  ].filter(Boolean);
+
+  if (missing.length) {
     document.body.innerHTML =
-      '<div class="overlay"><div class="card"><h1>No station data</h1>' +
-      "<p class=tagline>Run <code>python3 build-stations.py</code> to fetch it.</p></div></div>";
+      '<div class="overlay"><div class="card"><h1>No map data</h1>' +
+      "<p class=tagline>Run <code>python3 " +
+      missing.join("</code> and <code>python3 ") +
+      "</code> to fetch it.</p></div></div>";
     return;
   }
 

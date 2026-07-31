@@ -46,6 +46,18 @@
         </fieldset>
 
         <fieldset class="choice">
+          <legend>Difficulty</legend>
+          <div id="difficulty-options" class="options">
+            <button type="button" data-easy="" class="pill is-selected">Standard</button>
+            <button type="button" data-easy="1" class="pill">Easy</button>
+          </div>
+          <p class="choice-note" id="difficulty-note" hidden>
+            The network is drawn on the map while you guess. You still have to
+            know which station is which, but the lines tell you where to look.
+          </p>
+        </fieldset>
+
+        <fieldset class="choice">
           <legend>Time per round</legend>
           <div id="timer-options" class="options">
             <button type="button" data-time="" class="pill is-selected">No limit</button>
@@ -56,6 +68,7 @@
         </fieldset>
 
         <button type="button" id="start-btn" class="primary">Start playing</button>
+        <button type="button" id="demo-btn" class="ghost wide">Preview basemaps</button>
         <p class="best" id="best-line" hidden></p>
         <p class="fineprint">
           Station data from Île-de-France Mobilités open data (ODbL). The basemap
@@ -63,6 +76,24 @@
         </p>
       </div>
     </div>
+
+    <!-- Basemap preview -->
+    <aside class="demo" id="demo" hidden>
+      <div class="demo-head">
+        <strong>Basemap preview</strong>
+        <button type="button" id="demo-close" class="ghost">Back</button>
+      </div>
+      <div class="options" id="demo-layers"></div>
+      <p class="demo-note" id="demo-note"></p>
+      <div class="demo-meta">
+        <span id="demo-zoom" class="demo-zoom">z13</span>
+        <button type="button" id="demo-pin" class="ghost">Drop a sample reveal</button>
+      </div>
+      <p class="demo-hint">
+        Zoom past z17 and pan around: any style that prints a station name is
+        unusable. Esc goes back.
+      </p>
+    </aside>
 
     <!-- In-game HUD -->
     <header class="hud" id="hud" hidden>
@@ -111,6 +142,7 @@
       crossorigin=""
     ></script>
     <script src="data/stations.js"></script>
+    <script src="data/lines.js"></script>
     <script src="js/lines.js"></script>
     <script src="js/geo.js"></script>
     <script src="js/game.js"></script>

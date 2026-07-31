@@ -234,6 +234,94 @@ h1 {
   border-color: rgba(255, 255, 255, 0.3);
 }
 
+.ghost.wide {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 20px;
+}
+
+/* ---------- basemap preview ---------- */
+
+.demo {
+  position: absolute;
+  top: 14px;
+  left: 40px;
+  z-index: 900;
+  width: 330px;
+  max-width: calc(100% - 80px);
+  padding: 14px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.demo[hidden] {
+  display: none;
+}
+
+.demo-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.demo-head strong {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+}
+
+.demo .pill {
+  min-width: 0;
+  padding: 7px 12px;
+  font-size: 13.5px;
+}
+
+.demo-note {
+  margin: 10px 0 0;
+  min-height: 34px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+.demo-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.demo-zoom {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Past the game's ceiling you are looking at tiles no round will ever serve. */
+.demo-zoom.is-past-game {
+  color: var(--accent);
+}
+
+.demo-hint {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--edge);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
 /* ---------- HUD ---------- */
 
 .hud {
