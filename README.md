@@ -11,15 +11,25 @@ requests otherwise:
 
 ```sh
 cd paris-metro-guessr
-python3 -m http.server 8000
+python3 serve.py
 # open http://localhost:8000
 ```
 
+`serve.py` is `python3 -m http.server` plus `Cache-Control: no-store`, and the
+header is the entire point. The stock handler sends `Last-Modified` and nothing
+else, which leaves the browser to guess how long a file stays fresh — the guess
+is about a tenth of the file's age, so a script you haven't touched in a
+fortnight is assumed good for a day and a half and gets served from cache
+without being asked for. Edit one long-untouched file and you reload into new
+HTML wired to last week's JavaScript, which surfaces as a missing function
+rather than as anything resembling a caching problem. `python3 -m http.server`
+still works; you just have to hard-reload after every edit.
+
 ## How it plays
 
-- Pick a network (Métro / RER-only / everything), a round count (5 / 10 / 20, or
-  **deathmatch**, in standard or burn), a difficulty, and a time limit (no limit
-  / 60s / 30s / 10s).
+- Pick a network (**Paris intra muros** / Métro / RER-only / **pick your lines** /
+  everything), a round count (5 / 10 / 20, or **deathmatch**, in standard or
+  burn), a difficulty, and a time limit (no limit / 60s / 30s / 10s).
 - Click the map to drop your pin. Click again to move it.
 - **Guess** locks it in and reveals the true location, the great-circle miss
   distance, the points, and the lines that serve the station drawn on the map.
@@ -29,6 +39,24 @@ Scoring decays exponentially with the miss: `5000 · e^(−km/2.5)`, tuned to Pa
 scale. Adjacent métro stations sit roughly 500 m apart, so landing inside 500 m
 still pays 4094 of 5000. Best score per setup is kept in `localStorage`, keyed
 on the clock too — a 10s run doesn't compete with an untimed one.
+
+**Paris intra muros** is the tightest pool: the 253 stations inside the city
+limits, 241 métro and 12 RER-only ones — Auber, Luxembourg, Musée d'Orsay, Port
+Royal and friends. The limit is the real commune boundary from IGN, not a box
+drawn round the périphérique, so Porte des Lilas is in and Mairie des Lilas is
+out, Porte de Vincennes is in and Château de Vincennes is out, and both bois are
+Paris because administratively they are the 16e and the 12e. The map is fitted to
+the city each round rather than dropped at a fixed zoom, and easy mode clips the
+network to the same boundary — the lines stop where the pool does.
+
+**Pick your lines** is the fourth pool: tick the ones you want off the full
+roster — métro 1–14 with 3bis and 7bis, RER A–E — and the game only asks about
+stations on them. RER B and D on their own is 103 stations; line 1 alone is 25.
+Unlike the RER-only pool it keeps the interchanges, because asking for B and D
+means the whole of B and D, Châtelet included. The starting view follows what you
+ticked (métro lines stay on Paris, RER lines pull back to the whole région), the
+easy-mode backdrop draws your lines and nothing else, and each shortlist keeps
+its own best-score record.
 
 **The network is drawn on the reveal** — the real track geometry of every line
 serving the station, in the official colours, under the pins and the miss line.
@@ -124,15 +152,16 @@ always credits whoever actually drew the tiles.
 
 ## Data
 
-`data/stations.js` and `data/lines.js` are generated, not hand-written.
-Regenerate with:
+`data/stations.js`, `data/lines.js` and `data/paris.js` are generated, not
+hand-written. Regenerate with:
 
 ```sh
 python3 build-stations.py
 python3 build-lines.py
+python3 build-paris.py   # after build-stations.py: it checks its work against it
 ```
 
-Both pull from [Île-de-France Mobilités open data](https://data.iledefrance-mobilites.fr)
+The first two pull from [Île-de-France Mobilités open data](https://data.iledefrance-mobilites.fr)
 (no API key needed). `build-stations.py` produces 536 stations — 318 serving
 métro, 218 RER-only — from `emplacement-des-gares-idf-data-generalisee`. Two
 things that source needs untangling for:
@@ -155,6 +184,18 @@ detail nobody can see, so they're simplified with Douglas-Peucker at roughly 11 
 That is under what a 2.5 px stroke can show at the game's maximum zoom, and it
 costs 82% of the coordinates: **82 kB** for the whole network.
 
+`build-paris.py` fetches the Paris commune contour from
+[geo.api.gouv.fr](https://geo.api.gouv.fr) (IGN Admin Express) for the
+intra-muros pool: one closed ring, 105 km² with the bois. That ring decides
+whether a station is in the pool at all, so it is *not* simplified for looks like
+the track geometry is. The build runs the same point-in-polygon test the game
+runs, at each candidate tolerance in turn, and keeps the first that puts every
+one of the 536 stations on the side the full-resolution ring puts it on — 532
+points down to 164, **3.2 kB**, with the verdicts provably unchanged. It also
+prints the closest call, which is Château de Vincennes: 1 m outside. That one is
+genuinely on the line, and correctly so, because the station sits in the commune
+of Vincennes rather than in Paris.
+
 There is no free transit *basemap* to lean on instead — OpenRailwayMap's tiles
 403, Thunderforest Transport wants an API key — and drawing it ourselves is the
 better answer anyway: no labels to leak, and the lines come out in the same
@@ -168,9 +209,11 @@ Station data is ODbL, © Île-de-France Mobilités. Tiles © CARTO,
 | File | Role |
 | --- | --- |
 | `js/game.js` | Rules and round state. No DOM, no Leaflet — testable alone. |
-| `js/geo.js` | Haversine, scoring curve, formatting. Pure functions. |
+| `js/geo.js` | Haversine, scoring curve, formatting, the Paris boundary test. Pure functions. |
 | `js/i18n.js` | English and French copy, plus `t()` and locale number formatting. |
-| `js/lines.js` | Official IDFM line colours + WCAG-luminance badge contrast. |
+| `js/lines.js` | Official IDFM line colours, the line roster in plan order, WCAG-luminance badge contrast. |
 | `js/app.js` | Leaflet + DOM wiring. Renders state, forwards input. |
 | `build-stations.py` | Regenerates `data/stations.js` from the open data API. |
 | `build-lines.py` | Regenerates `data/lines.js` — track geometry, simplified. |
+| `build-paris.py` | Regenerates `data/paris.js` — the city limits, simplified only as far as the station verdicts allow. |
+| `serve.py` | Dev server that sends `no-store`, so an edit is never masked by a cached script. |

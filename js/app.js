@@ -67,6 +67,12 @@
     startScreen: el("start-screen"),
     langOptions: el("lang-options"),
     poolOptions: el("pool-options"),
+    linePicker: el("line-picker"),
+    lineMetro: el("line-metro"),
+    lineRer: el("line-rer"),
+    linesAll: el("lines-all"),
+    linesNone: el("lines-none"),
+    linesNote: el("lines-note"),
     roundOptions: el("round-options"),
     variantOptions: el("variant-options"),
     difficultyOptions: el("difficulty-options"),
@@ -115,6 +121,9 @@
   let game = null;
   let settings = {
     pool: "metro",
+    // The "pick your lines" shortlist. Kept across pool switches, so flipping to
+    // Métro and back doesn't lose the selection you just made.
+    lines: { metro: [], rer: [] },
     rounds: 10,
     timeLimit: null,
     deathmatch: false,
@@ -196,11 +205,41 @@
   /**
    * The lines a pool plays on. Métro-only games have no business showing the
    * RER out to Melun, and the RER game shouldn't sketch the métro underneath it.
+   * A shortlist gets exactly what it asked for - the point of picking B and D is
+   * a board with B and D on it.
    */
-  function segmentsForPool(poolKey) {
+  function segmentsForPool(poolKey, lines = window.NO_LINES) {
+    if (poolKey === "custom") {
+      return window.LINES.filter((s) => lines[s.kind].includes(s.line));
+    }
+    if (poolKey === "paris") return clipToParis(window.LINES);
     if (poolKey === "metro") return window.LINES.filter((s) => s.kind === "metro");
     if (poolKey === "rer") return window.LINES.filter((s) => s.kind === "rer");
     return window.LINES;
+  }
+
+  /**
+   * Cut the network at the city limits, for the intra-muros backdrop. Dropping
+   * whole segments would leave line 1 stopping at Concorde, so each one is
+   * walked point by point and every run of consecutive points inside Paris
+   * becomes a segment of its own - the lines end at the boundary the pool is
+   * defined by, which is the shape the mode is asking you to learn.
+   */
+  function clipToParis(segments) {
+    const clipped = [];
+    segments.forEach((segment) => {
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) clipped.push({ ...segment, pts: run });
+        run = [];
+      };
+      segment.pts.forEach((pt) => {
+        if (window.inParis({ lat: pt[0], lon: pt[1] })) run.push(pt);
+        else flush();
+      });
+      flush();
+    });
+    return clipped;
   }
 
   function segmentsForStation(station) {
@@ -216,10 +255,10 @@
    * as a hint rather than as the answer. Built once per game and left on the map
    * between rounds - 660 polylines is not something to rebuild every round.
    */
-  function showNetwork(poolKey) {
+  function showNetwork(poolKey, lines) {
     hideNetwork();
     networkLayer = L.layerGroup(
-      segmentsForPool(poolKey).map((s) =>
+      segmentsForPool(poolKey, lines).map((s) =>
         L.polyline(s.pts, {
           color: colorOf(s),
           weight: 2.5,
@@ -388,9 +427,14 @@
     ui.map.classList.add("is-guessing");
 
     // Reset the viewport every round: a leftover zoom from the previous reveal
-    // would otherwise hand out a free hint about where we are.
-    const view = window.POOLS[game.poolKey].view;
-    map.setView(view.center, view.zoom, { animate: false });
+    // would otherwise hand out a free hint about where we are. A pool that
+    // carries bounds gets fitted to them, so the frame adapts to the screen
+    // instead of trusting one zoom level to suit every window.
+    if (game.view.bounds) {
+      map.fitBounds(game.view.bounds, { animate: false, padding: [10, 10] });
+    } else {
+      map.setView(game.view.center, game.view.zoom, { animate: false });
+    }
 
     startClock();
   }
@@ -575,10 +619,11 @@
     station.rer.forEach((l) => add("rer", l));
   }
 
+  const linesPicked = () => settings.lines.metro.length + settings.lines.rer.length;
+
   function buildStartScreen() {
     ui.poolOptions.textContent = "";
-    Object.entries(window.POOLS).forEach(([key, pool]) => {
-      const count = window.STATIONS.filter(pool.filter).length;
+    Object.keys(window.POOLS).forEach((key) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "pool" + (key === settings.pool ? " is-selected" : "");
@@ -586,12 +631,79 @@
       const label = document.createElement("strong");
       label.textContent = t(`pool.${key}.label`);
       const blurb = document.createElement("span");
-      blurb.textContent = `${t("pool.count", { count })} · ${t(`pool.${key}.blurb`)}`;
+      blurb.className = "pool-blurb";
       btn.append(label, blurb);
       ui.poolOptions.appendChild(btn);
     });
+    paintPoolBlurbs();
+    buildLinePicker();
+    paintStartBtn();
     renderDeathmatch();
     renderBest();
+  }
+
+  // The station count is the honest measure of what a pool is, and for the
+  // shortlist it moves with every badge you tick - so it is painted apart from
+  // the buttons rather than baked into them.
+  function paintPoolBlurbs() {
+    ui.poolOptions.querySelectorAll(".pool").forEach((btn) => {
+      const key = btn.dataset.pool;
+      const count = window.stationsFor(window.STATIONS, key, settings.lines).length;
+      btn.querySelector(".pool-blurb").textContent =
+        `${t("pool.count", { count })} · ${t(`pool.${key}.blurb`)}`;
+    });
+  }
+
+  /**
+   * The line roster, in official colours. Every badge is always on the board and
+   * a pick lights it up, so the row reads as a plan you are ticking off rather
+   * than as a list that grows and shrinks under the cursor.
+   */
+  function buildLinePicker() {
+    ui.linePicker.hidden = settings.pool !== "custom";
+    if (ui.linePicker.hidden) return;
+
+    [
+      ["metro", ui.lineMetro],
+      ["rer", ui.lineRer],
+    ].forEach(([kind, host]) => {
+      host.textContent = "";
+      window.LINE_ORDER[kind].forEach((line) => {
+        const color = window.LINE_COLORS[kind][line];
+        const picked = settings.lines[kind].includes(line);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `linebadge ${kind}` + (picked ? " is-selected" : "");
+        btn.dataset.kind = kind;
+        btn.dataset.line = line;
+        btn.style.background = color;
+        btn.style.color = window.textOn(color);
+        btn.textContent = line;
+        // The colour is the label here, so the name has to be spelled out for
+        // anyone not reading it - and 3bis and 7bis share a colour with 13 and 6.
+        btn.setAttribute(
+          "aria-label",
+          kind === "rer" ? t("lines.rerName", { line }) : t("lines.metroName", { line })
+        );
+        btn.setAttribute("aria-pressed", String(picked));
+        host.appendChild(btn);
+      });
+    });
+    paintLinesNote();
+  }
+
+  // Nothing ticked is a dead end rather than a rule, so it says so in the
+  // warning colour instead of explaining how the shortlist reads.
+  function paintLinesNote() {
+    const empty = !linesPicked();
+    ui.linesNote.hidden = false;
+    ui.linesNote.textContent = empty ? t("lines.empty") : t("lines.note");
+    ui.linesNote.classList.toggle("is-warning", empty);
+  }
+
+  // A shortlist with nothing on it has no stations to ask about.
+  function paintStartBtn() {
+    ui.startBtn.disabled = settings.pool === "custom" && !linesPicked();
   }
 
   // The variant picker and its rules blurb only exist inside deathmatch.
@@ -627,8 +739,11 @@
   }
 
   function startGame() {
+    // Enter starts a game too, so the empty-shortlist gate lives here rather
+    // than only on the button's disabled state.
+    if (settings.pool === "custom" && !linesPicked()) return;
     game = new window.Game(window.STATIONS, settings);
-    if (settings.easy) showNetwork(game.poolKey);
+    if (settings.easy) showNetwork(game.poolKey, game.lines);
     else hideNetwork();
     ui.startScreen.hidden = true;
     ui.endScreen.hidden = true;
@@ -730,8 +845,16 @@
   // The clock changes the game enough that scores aren't comparable across it,
   // so a 10s run gets its own record rather than competing with an untimed one.
   // Easy draws the network on the board, so those runs get their own record too.
+  // A shortlist is a pool of its own: line 1 alone and the whole métro are not
+  // the same game, so the picked lines go in the key.
+  const poolKeyFor = (s) =>
+    s.pool === "custom"
+      ? `custom-${s.lines.metro.join("+")}/${s.lines.rer.join("+")}`
+      : s.pool;
+
   const bestKeyFor = (s) =>
-    `${s.pool}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:${s.timeLimit ?? "free"}` +
+    `${poolKeyFor(s)}:${s.deathmatch ? `dm-${s.variant}` : s.rounds}:` +
+    `${s.timeLimit ?? "free"}` +
     (s.easy ? ":easy" : "");
 
   function readBest() {
@@ -824,8 +947,60 @@
     if (!btn) return;
     settings.pool = btn.dataset.pool;
     selectIn(ui.poolOptions, ".pool", btn);
+    buildLinePicker();
+    paintStartBtn();
     renderBest();
   });
+
+  /**
+   * Tick a line on or off. The shortlist is kept in plan order rather than in
+   * click order, so picking B then D and picking D then B are the same setup -
+   * which matters, because the list is part of the best-score key.
+   */
+  function toggleLine(kind, line) {
+    const picked = settings.lines[kind];
+    const at = picked.indexOf(line);
+    if (at >= 0) picked.splice(at, 1);
+    else picked.push(line);
+    picked.sort(
+      (a, b) => window.LINE_ORDER[kind].indexOf(a) - window.LINE_ORDER[kind].indexOf(b)
+    );
+  }
+
+  ui.linePicker.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".linebadge");
+    if (!btn) return;
+    const { kind, line } = btn.dataset;
+    toggleLine(kind, line);
+    // Repaint the one badge rather than the whole roster: rebuilding would drop
+    // keyboard focus off the badge that was just toggled.
+    const picked = settings.lines[kind].includes(line);
+    btn.classList.toggle("is-selected", picked);
+    btn.setAttribute("aria-pressed", String(picked));
+    afterLinesChanged();
+  });
+
+  ui.linesAll.addEventListener("click", () => {
+    settings.lines = {
+      metro: window.LINE_ORDER.metro.slice(),
+      rer: window.LINE_ORDER.rer.slice(),
+    };
+    buildLinePicker();
+    afterLinesChanged();
+  });
+
+  ui.linesNone.addEventListener("click", () => {
+    settings.lines = { metro: [], rer: [] };
+    buildLinePicker();
+    afterLinesChanged();
+  });
+
+  function afterLinesChanged() {
+    paintLinesNote();
+    paintPoolBlurbs();
+    paintStartBtn();
+    renderBest();
+  }
 
   ui.roundOptions.addEventListener("click", (ev) => {
     const btn = ev.target.closest(".pill");
@@ -921,6 +1096,7 @@
   const missing = [
     !window.STATIONS || !window.STATIONS.length ? "build-stations.py" : null,
     !window.LINES || !window.LINES.length ? "build-lines.py" : null,
+    !window.PARIS_BOUNDARY || !window.PARIS_BOUNDARY.length ? "build-paris.py" : null,
   ].filter(Boolean);
 
   // Untranslated on purpose: this screen is for whoever is running the repo, not

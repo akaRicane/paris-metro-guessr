@@ -28,6 +28,18 @@ window.LINE_COLORS = {
   },
 };
 
+// Every line, in the order a Parisian reads a plan: the bis lines sit next to
+// their parent rather than at the end. Object key order won't do it - JS sorts
+// the integer-like keys ("1".."14") ahead of "3bis" and "7bis" whatever the
+// literal says. This is also the roster the line picker offers.
+window.LINE_ORDER = {
+  metro: [
+    "1", "2", "3", "3bis", "4", "5", "6", "7", "7bis",
+    "8", "9", "10", "11", "12", "13", "14",
+  ],
+  rer: ["A", "B", "C", "D", "E"],
+};
+
 // Pale line colours (M1 yellow, M8 lilac) need dark text; deep ones need white.
 // Relative luminance per WCAG, so the badge stays readable without a lookup table.
 window.textOn = function (hex) {

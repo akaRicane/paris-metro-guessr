@@ -184,6 +184,90 @@ h1 {
   background: rgba(255, 206, 0, 0.09);
 }
 
+/* ---------- line picker ---------- */
+
+/* Hangs off the "pick your lines" pool button, so it is indented under it the
+   way the deathmatch variants are indented under theirs. */
+.linepicker {
+  margin-top: 10px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(255, 206, 0, 0.4);
+}
+
+.linepicker[hidden] {
+  display: none;
+}
+
+.linegroup + .linegroup {
+  margin-top: 10px;
+}
+
+.linegroup-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.linebadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The badge *is* the line, so it always carries the official colour. Ticking it
+   is what brings it up to full strength - an unpicked line reads as greyed-out
+   ink on the plan rather than disappearing from the row. */
+.linebadge {
+  min-width: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 999px;
+  font: 700 13px/1.25 inherit;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.34;
+  filter: grayscale(0.55);
+  outline-offset: 2px;
+  transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s;
+}
+
+/* RER runs as a square badge everywhere else in the game; keep it here. */
+.linebadge.rer {
+  border-radius: 5px;
+}
+
+.linebadge:hover {
+  opacity: 0.7;
+  filter: grayscale(0.2);
+}
+
+.linebadge.is-selected {
+  opacity: 1;
+  filter: none;
+  box-shadow: 0 0 0 2px var(--panel-solid), 0 0 0 3.5px var(--accent);
+}
+
+.linepicker-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ghost.tiny {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* An empty shortlist blocks the start button, so it is a problem to fix rather
+   than a note to read. */
+.choice-note.is-warning {
+  color: var(--bad);
+}
+
 .pill {
   min-width: 62px;
   padding: 9px 16px;

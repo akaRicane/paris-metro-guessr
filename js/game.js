@@ -3,10 +3,25 @@
 
 // Labels and blurbs live in i18n.js under `pool.<key>.label` / `.blurb`, so
 // this file stays language-free.
+//
+// A filter takes the station and the player's line shortlist. Only `custom`
+// reads the second argument; the fixed pools ignore it.
+//
+// Key order is menu order on the start screen.
 window.POOLS = {
   metro: {
     filter: (s) => s.metro.length > 0,
     view: { center: [48.8566, 2.3522], zoom: 12 },
+  },
+  paris: {
+    // Inside the city limits, whatever serves it - the 241 metro stations that
+    // are actually in Paris, plus the dozen RER-only ones (Auber, Luxembourg,
+    // Musee d'Orsay, Port Royal...). No La Defense, no Mairie de Montreuil.
+    filter: (s) => window.inParis(s),
+    // The only pool with a footprint worth framing exactly, so it is fitted to
+    // the city rather than dropped at a fixed zoom: intra muros is 12 km across
+    // and a zoom that suits a laptop leaves half of it off a phone.
+    view: { center: [48.8566, 2.3522], zoom: 12, bounds: window.PARIS_BOUNDS },
   },
   rer: {
     // Metro interchanges are excluded so this stays a genuinely different game:
@@ -14,10 +29,39 @@ window.POOLS = {
     filter: (s) => s.rer.length > 0 && s.metro.length === 0,
     view: { center: [48.8566, 2.3522], zoom: 10 },
   },
+  custom: {
+    // Your own shortlist - one line, or RER B and D, or the whole left bank.
+    // Unlike the RER pool this keeps the interchanges: asking for B and D means
+    // the whole of B and D, Châtelet included, because that is what you picked.
+    filter: (s, lines) =>
+      s.metro.some((l) => lines.metro.includes(l)) ||
+      s.rer.some((l) => lines.rer.includes(l)),
+    // No fixed footprint of its own - see window.viewFor().
+    view: null,
+  },
   all: {
     filter: () => true,
     view: { center: [48.8566, 2.3522], zoom: 11 },
   },
+};
+
+window.NO_LINES = { metro: [], rer: [] };
+
+/** Stations a pool plays on, given the shortlist a custom pool needs. */
+window.stationsFor = function (stations, poolKey, lines = window.NO_LINES) {
+  return stations.filter((s) => window.POOLS[poolKey].filter(s, lines));
+};
+
+/**
+ * Where the map sits at the top of every round. A shortlist has no footprint of
+ * its own, so it borrows the view of whichever fixed pool it most resembles:
+ * RER lines run out to Melun and need the whole région in frame, métro lines
+ * don't, and a mix wants the middle setting.
+ */
+window.viewFor = function (poolKey, lines = window.NO_LINES) {
+  if (poolKey !== "custom") return window.POOLS[poolKey].view;
+  if (!lines.rer.length) return window.POOLS.metro.view;
+  return lines.metro.length ? window.POOLS.all.view : window.POOLS.rer.view;
 };
 
 // Deathmatch life bar. Both variants spend the same currency - the points you
@@ -35,6 +79,7 @@ window.Game = class Game {
     stations,
     {
       pool = "metro",
+      lines = window.NO_LINES,
       rounds = 5,
       timeLimit = null,
       deathmatch = false,
@@ -42,7 +87,11 @@ window.Game = class Game {
     } = {}
   ) {
     this.poolKey = pool;
-    const candidates = stations.filter(window.POOLS[pool].filter);
+    // Frozen at kick-off: the start screen keeps mutating its own copy, and a
+    // game in flight must not have its pool redefined under it.
+    this.lines = { metro: lines.metro.slice(), rer: lines.rer.slice() };
+    this.view = window.viewFor(pool, this.lines);
+    const candidates = window.stationsFor(stations, pool, this.lines);
     if (!candidates.length) throw new Error(`empty station pool: ${pool}`);
 
     this.timeLimit = timeLimit; // seconds per round, or null for untimed

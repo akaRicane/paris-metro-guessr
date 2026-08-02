@@ -36,14 +36,31 @@
       "legend.timer": "Time per round",
 
       // network pools
+      "pool.paris.label": "Paris intra muros",
+      "pool.paris.blurb": "inside the city limits, both bois included",
       "pool.metro.label": "Métro",
       "pool.metro.blurb": "Paris and the inner suburbs",
       "pool.rer.label": "RER only",
       "pool.rer.blurb": "the whole région, out to Cergy and Melun",
+      "pool.custom.label": "Pick your lines",
+      "pool.custom.blurb": "only the lines you tick",
       "pool.all.label": "Everything",
       "pool.all.blurb": "métro and RER combined",
       "pool.count.one": "{count} station",
       "pool.count.other": "{count} stations",
+
+      // line picker
+      "lines.metro": "Métro",
+      "lines.rer": "RER",
+      "lines.all": "Select all",
+      "lines.none": "Clear",
+      "lines.note":
+        "A station counts as soon as it serves one of your lines — " +
+        "interchanges included.",
+      "lines.empty": "Tick at least one line to play.",
+      // Screen-reader names for the colour chips.
+      "lines.metroName": "Métro line {line}",
+      "lines.rerName": "RER {line}",
 
       // rounds and deathmatch
       "rounds.deathmatch": "Deathmatch",
@@ -158,14 +175,29 @@
       "legend.difficulty": "Difficulté",
       "legend.timer": "Temps par manche",
 
+      "pool.paris.label": "Paris intra muros",
+      "pool.paris.blurb": "dans les limites de la ville, bois compris",
       "pool.metro.label": "Métro",
       "pool.metro.blurb": "Paris et la petite couronne",
       "pool.rer.label": "RER seul",
       "pool.rer.blurb": "toute la région, jusqu'à Cergy et Melun",
+      "pool.custom.label": "Choisis tes lignes",
+      "pool.custom.blurb": "seulement les lignes que tu coches",
       "pool.all.label": "Tout",
       "pool.all.blurb": "métro et RER réunis",
       "pool.count.one": "{count} station",
       "pool.count.other": "{count} stations",
+
+      "lines.metro": "Métro",
+      "lines.rer": "RER",
+      "lines.all": "Tout cocher",
+      "lines.none": "Tout décocher",
+      "lines.note":
+        "Une station compte dès qu'elle dessert une de tes lignes — " +
+        "correspondances comprises.",
+      "lines.empty": "Coche au moins une ligne pour jouer.",
+      "lines.metroName": "Ligne de métro {line}",
+      "lines.rerName": "RER {line}",
 
       "rounds.deathmatch": "Deathmatch",
       "variant.standard": "Standard",
